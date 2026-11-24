@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="<%= current_locale %>">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title><%= yield_content(:title, "") %><%= content_for?(:title) ? " · " : "" %>__APP_TITLE__</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <%= csrf_meta_tags %>
+  <%= stylesheet_tag "app.css" %>
+  <%= importmap_tags %>
+  <%= silth_scripts %>
+</head>
+<body>
+  <header class="topbar">
+    <a href="/" class="brand"><img src="/favicon.svg" alt="" width="22" height="22"> __APP_TITLE__</a>
+    <nav>
+      <a href="/" class="<%= active_class("/", exact: true) %>"><%= t("nav.home") %></a>
+      <a href="/counter" class="<%= active_class("/counter") %>">Live</a>
+      <% if Silth.router.has_route?("login") %>
+        <% if ctx.auth_user %>
+          <%= button_to t("nav.logout"), "/logout", method: "delete", class: "btn btn-ghost" %>
+        <% else %>
+          <a href="/login"><%= t("nav.login") %></a>
+        <% end %>
+      <% end %>
+    </nav>
+  </header>
+  <main class="container">
+    <%= flash_messages %>
+    <%= content %>
+  </main>
+  <footer class="footer">Built with <a href="https://silth.dev">Silth</a></footer>
+</body>
+</html>

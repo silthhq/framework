@@ -1,0 +1,14 @@
+/lib/
+/bin/
+/.shards/
+/tmp/*
+!/tmp/.keep
+/storage/*
+!/storage/.keep
+/public/assets/
+/dist/
+/db/*.sqlite3*
+.env
+.env.local
+*.dwarf
+.DS_Store

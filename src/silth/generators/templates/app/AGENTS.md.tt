@@ -1,0 +1,57 @@
+# __APP_TITLE__ — guide for AI coding agents
+
+This is a [Silth](https://silth.dev) application (Crystal web framework, MVC, zero third-party shards).
+Read this file before changing code. Full docs: https://silth.dev/docs · LLM index: https://silth.dev/llms.txt
+
+## Commands
+
+| Task | Command |
+|---|---|
+| Dev server (rebuild + live reload) | `silth serve` |
+| Run tests | `silth test` (or `crystal spec`) |
+| Generate code | `silth g scaffold Post title:string body:text? user:references` |
+| Migrations | `silth db:migrate`, `silth db:rollback`, `silth db:status` |
+| List routes (JSON for tools) | `silth routes --json` |
+| Everything else | `silth help` |
+
+Always run `crystal tool format` and `silth test` before finishing a task.
+
+## Layout
+
+```
+config/            YAML configuration (one file per concern, `when@env:` overrides) + routes.cr
+src/app.cr         loads everything (order matters: base classes first)
+src/models/        Silth::Model subclasses (columns, relations, validations, scopes)
+src/controllers/   Silth::Controller subclasses, one action per route
+src/views/         ECR templates (.html.ecr) — `<%= %>` is HTML escaped, `<%== %>` is raw
+src/components/    Silth::Component / Silth::LiveComponent
+src/jobs, mails, notifications, policies, events, listeners, channels, commands, requests
+db/migrations/     versioned migrations (`version YYYY_MM_DD_HHMMSS`)
+spec/              specs (`client.get("/")`, factories in spec/factories)
+assets/            CSS/JS served as-is in dev, fingerprinted by `silth assets:build`
+```
+
+## Conventions (follow them)
+
+- Models: `primary_key`, `column name : Type`, `belongs_to x : X`, `has_many xs : X`, `validates field, presence: true`.
+  Non-nilable getters raise when the value is missing; use `field?` for a nilable read.
+- Controllers render with `render "dir/template", local: value` and redirect with `redirect route("name", id: x.id), notice: "…"`.
+  Mass assignment must go through `params.permit(:a, :b, from: :model)`.
+- Templates are compiled into the binary: a template change needs a rebuild (`silth serve` does it).
+- Blocks in templates use control tags: `<% form_with url: …, model: post do |f| %> … <% end %>`.
+- Authorization: policies in `src/policies` (`update?(user : User, post : Post) : Bool`), call `authorize! :update, post`.
+- Never commit secrets; configuration reads `${ENV_VAR:-default}` from YAML.
+- Prefer the query builder (`Post.where(published: true).order(created_at: :desc)`) over raw SQL; raw SQL always uses `?` placeholders.
+
+## Testing
+
+```crystal
+describe PostsController do
+  it "creates a post" do
+    response = client.post("/posts", form: {"post[title]" => "Hello"})
+    response.should redirect_to("/posts/1")
+  end
+end
+```
+
+Fakes: `Silth::Mailer.fake`, `Silth::Queue.fake`, `Silth::Events.fake`, `Silth::Storage.fake`, `Silth::HTTPClient.fake(...)`.

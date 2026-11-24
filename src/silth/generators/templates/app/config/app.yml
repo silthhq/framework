@@ -1,0 +1,10 @@
+# Application settings. `${VAR:-default}` reads the environment, `when@<env>` overrides per environment.
+name: __APP_TITLE__
+url: ${APP_URL:-http://localhost:3000}
+version: 0.1.0
+debug: false
+live_reload: true
+public_dir: public
+
+when@development:
+  debug: true

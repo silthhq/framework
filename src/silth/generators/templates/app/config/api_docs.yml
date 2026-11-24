@@ -1,0 +1,7 @@
+enabled: true
+path: /docs/api
+title: __APP_TITLE__ API
+version: 1.0.0
+
+when@production:
+  enabled: false

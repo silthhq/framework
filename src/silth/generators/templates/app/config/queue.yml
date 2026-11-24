@@ -1,0 +1,7 @@
+driver: memory            # sync | memory | database | redis
+# url: ${REDIS_URL:-redis://localhost:6379/0}
+
+when@test:
+  driver: sync
+when@production:
+  driver: database

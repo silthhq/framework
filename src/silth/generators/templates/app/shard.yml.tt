@@ -1,0 +1,15 @@
+name: __APP_NAME__
+version: 0.1.0
+
+targets:
+  __APP_NAME__:
+    main: src/server.cr
+  cli:
+    main: src/cli.cr
+
+dependencies:
+  silth:
+__SILTH_DEP__
+
+crystal: ">= 1.22.0"
+license: MIT

@@ -1,0 +1,21 @@
+name: silth
+version: 0.1.0
+
+description: |
+  Silth — a dark, elegant, batteries-included MVC web framework for Crystal.
+  Zero third-party shards: routing, ORM (PostgreSQL, SQLite, MariaDB), live components,
+  queues, mail, storage, profiler, OpenTelemetry and more, all in the box.
+
+authors:
+  - Silth contributors
+
+crystal: ">= 1.22.0"
+
+license: MIT
+
+targets:
+  silth:
+    main: src/cli/main.cr
+
+libraries:
+  libsqlite3: ">= 3.35"

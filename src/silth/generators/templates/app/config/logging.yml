@@ -1,0 +1,9 @@
+level: debug
+format: pretty            # pretty | json
+# file: log/app.log
+
+when@production:
+  level: info
+  format: json
+when@test:
+  level: warn

@@ -1,0 +1,6 @@
+en:
+  greeting: "Hello %{name}"
+  apples:
+    zero: "No apples"
+    one: "One apple"
+    other: "%{count} apples"

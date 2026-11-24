@@ -1,0 +1,5 @@
+# OpenTelemetry (OTLP/HTTP). Also enabled by OTEL_EXPORTER_OTLP_ENDPOINT.
+enabled: false
+service_name: __APP_NAME__
+endpoint: http://localhost:4318
+sample_rate: 1.0

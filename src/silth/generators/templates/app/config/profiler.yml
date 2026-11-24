@@ -1,0 +1,7 @@
+enabled: false
+toolbar: true
+keep: 200
+slow_query_ms: 100
+
+when@development:
+  enabled: true

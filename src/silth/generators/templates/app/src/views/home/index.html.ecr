@@ -1,0 +1,18 @@
+<% content_for :title, "Welcome" %>
+<section class="hero">
+  <img class="hero-glyph" src="/favicon.svg" alt="" width="96" height="96">
+  <h1>__APP_TITLE__</h1>
+  <p class="lead"><%= t("app.tagline") %></p>
+  <div class="row center">
+    <a class="btn btn-primary" href="https://silth.dev/docs">Read the docs</a>
+    <a class="btn" href="/counter">Try a live component</a>
+  </div>
+</section>
+
+<section class="grid">
+  <div class="card"><h3>Generate</h3><p class="muted">Scaffold a full CRUD in one command.</p><pre><code>silth g scaffold Post title:string body:text</code></pre></div>
+  <div class="card"><h3>Migrate</h3><p class="muted">Schema changes for PostgreSQL, MariaDB and SQLite.</p><pre><code>silth db:migrate</code></pre></div>
+  <div class="card"><h3>Profile</h3><p class="muted">Every request is profiled in development.</p><pre><code>open /_silth/profiler</code></pre></div>
+</section>
+
+<%= component AlertComponent, message: "You are running Silth #{Silth::VERSION} on Crystal #{Crystal::VERSION} in #{Silth.env}.", variant: "info" %>

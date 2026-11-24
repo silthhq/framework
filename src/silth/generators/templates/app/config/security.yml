@@ -1,0 +1,9 @@
+# Content-Security-Policy. `{nonce}` is replaced by a per-request nonce (`csp_nonce` helper).
+csp: "default-src 'self'; script-src 'self' 'nonce-{nonce}'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' ws: wss:; frame-ancestors 'self'; base-uri 'self'; form-action 'self'"
+hsts: false
+csrf_except:
+  - /stripe/webhook
+trusted_origins: []
+
+when@production:
+  hsts: true

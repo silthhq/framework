@@ -1,0 +1,12 @@
+fr:
+  app:
+    tagline: "Forgé dans l'ombre. Bâti pour durer."
+  nav:
+    home: Accueil
+    login: Connexion
+    logout: Déconnexion
+    register: Créer un compte
+  flash:
+    created: Créé avec succès.
+    updated: Mis à jour.
+    deleted: Supprimé.

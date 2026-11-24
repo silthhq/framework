@@ -1,0 +1,5 @@
+# Shortcuts for `silth <alias>`.
+aliases:
+  m: db:migrate
+  r: routes
+  s: server

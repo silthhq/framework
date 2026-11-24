@@ -1,0 +1,14 @@
+driver: file              # memory | log | file | smtp
+from:
+  address: hello@example.com
+  name: __APP_TITLE__
+host: ${MAIL_HOST:-localhost}
+port: ${MAIL_PORT:-587}
+username: ${MAIL_USERNAME:-}
+password: ${MAIL_PASSWORD:-}
+encryption: starttls      # starttls | tls | none
+
+when@test:
+  driver: memory
+when@production:
+  driver: smtp

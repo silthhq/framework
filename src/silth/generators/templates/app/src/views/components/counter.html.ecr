@@ -1,0 +1,12 @@
+<div class="card counter">
+  <p class="eyebrow">Live component</p>
+  <p class="counter-value"><%= count %></p>
+  <div class="row">
+    <button class="btn" silth-click="decrement">−</button>
+    <button class="btn btn-primary" silth-click="increment">+</button>
+    <button class="btn btn-ghost" silth-click="reset">Reset</button>
+  </div>
+  <label class="field inline">Step
+    <input type="number" min="1" max="10" value="<%= step %>" silth-model="step">
+  </label>
+</div>

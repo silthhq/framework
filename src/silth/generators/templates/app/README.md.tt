@@ -1,0 +1,13 @@
+# __APP_TITLE__
+
+A [Silth](https://silth.dev) application.
+
+```bash
+shards install
+silth db:migrate
+silth serve        # http://localhost:3000 — profiler at /_silth/profiler
+```
+
+- Tests: `silth test`
+- Production build: `shards build --release` then `SILTH_ENV=production bin/cli assets:build`
+- Docker: `docker build -t __APP_NAME__ .`

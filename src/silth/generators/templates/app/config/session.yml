@@ -1,0 +1,8 @@
+driver: cookie            # cookie | cache
+cookie: ___APP_NAME___session
+lifetime: 120             # minutes
+same_site: lax
+secure: false
+
+when@production:
+  secure: true

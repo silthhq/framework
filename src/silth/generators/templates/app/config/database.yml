@@ -1,0 +1,6 @@
+default: primary
+connections:
+  primary:
+    url: ${DATABASE_URL:-__DB_URL__}
+    pool: 10
+    timeout: 5
