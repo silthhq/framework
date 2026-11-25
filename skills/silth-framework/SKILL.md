@@ -12,6 +12,7 @@ framework/                the `silth` shard
   src/silth.cr            requires every module (order matters)
   src/silth/<module>.cr   one file per module (cache, queue, mailer, live, …)
   src/silth/db/           pool, dialects, query builder, schema, migrations, drivers/{postgres,mysql,sqlite}
+                          (drivers/mysql/: codec.cr = text/binary value encoding, rsa.cr = RSA-OAEP auth)
   src/silth/orm/          Model macros, typed Query(T), casting
   src/silth/view/         ECR processor (run macro), helpers, form builder
   src/silth/cli/          Command base, built-in commands
@@ -31,7 +32,8 @@ cd framework
 crystal spec                                              # SQLite in memory
 SILTH_TEST_DATABASE_URL=postgres://silth:silth@127.0.0.1:55432/silth_test crystal spec
 SILTH_TEST_DATABASE_URL=mysql://silth:silth@127.0.0.1:53306/silth_test crystal spec
-docker compose -f ../docker-compose.yml up -d             # pgvector + MariaDB + Redis + Mailpit + MinIO + Jaeger
+SILTH_TEST_DATABASE_URL=mysql://silth:silth@127.0.0.1:53307/silth_test SILTH_TEST_MYSQL_ADMIN_URL=mysql://root:silth@127.0.0.1:53307/silth_test crystal spec spec/mysql_spec.cr
+docker compose -f ../docker-compose.yml up -d             # pgvector + MariaDB + MySQL 8.4 + Redis + Mailpit + MinIO + Jaeger
 shards build silth                                        # global CLI → bin/silth
 bin/silth new /tmp/demo --path-to-silth=$PWD              # end-to-end check of templates
 cd ../website && ../framework/bin/silth export -o dist    # static site
@@ -56,3 +58,5 @@ After editing `templates/app` or `skills/silth`, run `bin/sync-skills` (copies t
 - `Time.monotonic` is deprecated: use `Time.instant`.
 - InnoDB FULLTEXT indexes only see committed rows.
 - Headers must be set before the body: use `ctx.before_send` / `ctx.filter_body`.
+- The stdlib already binds some libcrypto symbols (`BIO_free`…): a second `fun` for the same symbol with another signature does not compile. Bind only what the stdlib lacks (see `drivers/mysql/rsa.cr`).
+- MySQL prepared statements: `HANDLER`, `LOCK TABLES`… cannot be prepared (error 1295) and go through interpolation; MySQL 8 re-prepares statements internally when a parameter type changes, which also bumps `Com_stmt_prepare` (subtract `Com_stmt_reprepare` in specs).

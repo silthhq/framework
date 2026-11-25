@@ -8,6 +8,10 @@ services:
     image: mariadb:11
     environment: { MARIADB_ROOT_PASSWORD: silth, MARIADB_DATABASE: silth_test, MARIADB_USER: silth, MARIADB_PASSWORD: silth }
     ports: ["53306:3306"]
+  mysql:   # MySQL 8.4: caching_sha2_password (RSA authentication specs)
+    image: mysql:8.4
+    environment: { MYSQL_ROOT_PASSWORD: silth, MYSQL_DATABASE: silth_test, MYSQL_USER: silth, MYSQL_PASSWORD: silth }
+    ports: ["53307:3306"]
   redis:
     image: redis:7-alpine
     ports: ["56379:6379"]

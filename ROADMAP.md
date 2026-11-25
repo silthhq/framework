@@ -6,7 +6,7 @@ Everything listed in the README: HTTP stack, ORM with native drivers, live compo
 
 Next iterations of stage 1:
 
-- [ ] Binary prepared statements for MySQL (text protocol + client-side escaping today) and RSA full auth for `caching_sha2_password` without TLS
+- [x] Binary prepared statements for MySQL (per-connection LRU cache, interpolation fallback) and RSA full auth for `caching_sha2_password` / `sha256_password` without TLS
 - [ ] Reversible `change` migrations and schema dumps (`db/schema.cr`)
 - [ ] Polymorphic relations, counter caches, optimistic locking
 - [ ] Named slots for components, live component file uploads, nested live components
