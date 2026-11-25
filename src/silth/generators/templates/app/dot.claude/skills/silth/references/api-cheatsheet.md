@@ -48,6 +48,7 @@ Realtime: `class C < Silth::Channel; topic "chat:*"; def handle_in(event, payloa
 Workflows: `config/workflows.yml`, `Silth::Workflow.get("name").apply(model, "transition", user)`.
 Billing: `include Silth::Billing::Billable`, `user.checkout(price, success_url:, cancel_url:)`, `user.subscribed?`.
 Telemetry: `Silth::Telemetry.trace("name") { |span| }`, `counter`, `histogram`.
+Instrumentation (profiler, telemetry): `Silth::Instrument.subscribe { |event| }`, `Instrument.measure("name") { }`, `Instrument.publish(Instrument::Custom.new("name", {"k" => "v"}))`; framework events: Query, Action, Render, Translation (found/fallback/missing), Cache, Mail, Job, AppEvent, HTTPCall, Notification.
 I18n: `config/locales/<locale>.yml`, `t("key", count: n, name: x)`, `l(time, "long")`.
 
 ## CLI

@@ -1,0 +1,93 @@
+# Specs on every database Silth supports, then an end-to-end check of the app
+# generator (silth new, scaffold, migrations, the generated app's specs).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CRYSTAL_VERSION: "1.22"
+
+jobs:
+  specs:
+    name: specs (${{ matrix.database }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - database: sqlite
+            url: ""
+          - database: postgres
+            url: postgres://silth:silth@127.0.0.1:5432/silth_test
+          - database: mariadb
+            url: mysql://silth:silth@127.0.0.1:3306/silth_test
+          - database: mysql
+            url: mysql://silth:silth@127.0.0.1:3307/silth_test
+            admin_url: mysql://root:silth@127.0.0.1:3307/silth_test
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env: { POSTGRES_USER: silth, POSTGRES_PASSWORD: silth, POSTGRES_DB: silth_test }
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U silth" --health-interval 5s --health-timeout 5s --health-retries 20
+      mariadb:
+        image: mariadb:11
+        env: { MARIADB_ROOT_PASSWORD: silth, MARIADB_DATABASE: silth_test, MARIADB_USER: silth, MARIADB_PASSWORD: silth }
+        ports: ["3306:3306"]
+        options: --health-cmd "healthcheck.sh --connect --innodb_initialized" --health-interval 5s --health-timeout 5s --health-retries 30
+      mysql:
+        image: mysql:8.4
+        env: { MYSQL_ROOT_PASSWORD: silth, MYSQL_DATABASE: silth_test, MYSQL_USER: silth, MYSQL_PASSWORD: silth }
+        ports: ["3307:3306"]
+        options: --health-cmd "mysqladmin ping -h 127.0.0.1 -psilth" --health-interval 5s --health-timeout 5s --health-retries 30
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: ${{ env.CRYSTAL_VERSION }}
+      - run: sudo apt-get update -q && sudo apt-get install -y -q libsqlite3-dev
+      - name: crystal spec
+        env:
+          SILTH_TEST_DATABASE_URL: ${{ matrix.url }}
+          SILTH_TEST_MYSQL_ADMIN_URL: ${{ matrix.admin_url }}
+          SILTH_TEST_POSTGRES_URL: postgres://silth:silth@127.0.0.1:5432/silth_test
+          SILTH_TEST_REDIS_URL: redis://127.0.0.1:6379/15
+        run: |
+          [ -n "$SILTH_TEST_DATABASE_URL" ] || unset SILTH_TEST_DATABASE_URL
+          [ -n "$SILTH_TEST_MYSQL_ADMIN_URL" ] || unset SILTH_TEST_MYSQL_ADMIN_URL
+          crystal spec
+
+  generator:
+    name: silth new (end to end)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: ${{ env.CRYSTAL_VERSION }}
+      - run: sudo apt-get update -q && sudo apt-get install -y -q libsqlite3-dev
+      - name: Build the CLI
+        run: shards build silth
+      - name: Generate an application
+        run: |
+          bin/silth new "$RUNNER_TEMP/demo" --path-to-silth="$PWD"
+          cd "$RUNNER_TEMP/demo"
+          shards install
+          "$GITHUB_WORKSPACE/bin/silth" g scaffold Post title:string 'body:text?'
+          "$GITHUB_WORKSPACE/bin/silth" g mail Welcome
+      - name: Migrate, dump the schema, run the app's specs
+        working-directory: ${{ runner.temp }}/demo
+        run: |
+          "$GITHUB_WORKSPACE/bin/silth" db:migrate
+          grep -q 'create_table "posts"' db/schema.cr
+          "$GITHUB_WORKSPACE/bin/silth" db:rollback
+          "$GITHUB_WORKSPACE/bin/silth" db:migrate
+          crystal spec
+          crystal build src/server.cr -o bin/server --no-debug

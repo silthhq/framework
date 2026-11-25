@@ -129,7 +129,10 @@ module Silth
       value = lookup(loc, key, count)
       if value.nil?
         @@missing_handler.try &.call(loc, key)
+        Instrument.translation(key, loc, "missing")
         value = default || key
+      elsif Instrument.active?
+        Instrument.translation(key, loc, @@translations[loc]?.try { |t| t.has_key?(key) || (count && t.has_key?("#{key}.other")) } ? "found" : "fallback")
       end
       interpolate(value, count, vars)
     end

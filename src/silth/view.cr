@@ -65,11 +65,13 @@ module Silth
             {{key.id}} = %local{key}
           {% end %}
           %prev = @view_io
+          %render_started = Time.instant
           begin
             %content = String.build do |%io|
               @view_io = %io
               {{ run("./view/ecr_process", path, "@view_io") }}
             end
+            ::Silth::Instrument.render({{path}}, Time.instant - %render_started)
             {% if layout %}
               {% lpath = layout.ends_with?(".ecr") ? layout : "src/views/" + layout + ".html.ecr" %}
               String.build do |%io|

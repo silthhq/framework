@@ -2,14 +2,17 @@ module Silth
   module Brand
     INTERNAL_CSS = {{ read_file(__DIR__ + "/../assets/internal.css") }}
 
-    LOGO_SVG = <<-SVG
-      <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs><linearGradient id="silth-g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ecebf5"/><stop offset="1" stop-color="#5d8fb8"/></linearGradient></defs><path d="M21 27C14 20 13 11 17 4c1 8 5 14 10 17z" fill="#ecebf5" opacity=".92"/><path d="M43 27c7-7 8-16 4-23-1 8-5 14-10 17z" fill="#ecebf5" opacity=".92"/><path d="M32 12l11 16-11 32-11-32z" fill="url(#silth-g)"/><path d="M32 12v48M21 28l11 6 11-6" stroke="#07080c" stroke-width="1.6" fill="none" opacity=".5"/></svg>
-      SVG
+    # The Silth mark: a pale mask with two hollow eyes. Uses currentColor, size it with CSS.
+    LOGO_SVG = %(<svg class="s-mark" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M16 2C22.3 2 26 7 26 13.6C26 21 21.6 27.4 16 30C10.4 27.4 6 21 6 13.6C6 7 9.7 2 16 2ZM9.6 15.4a2.6 4.9 0 1 0 5.2 0a2.6 4.9 0 1 0 -5.2 0ZM17.2 15.4a2.6 4.9 0 1 0 5.2 0a2.6 4.9 0 1 0 -5.2 0Z"/></svg>)
+
+    # Standalone icon (dark square, pale mask): served at `/_silth/logo.svg` and used as favicon.
+    ICON_SVG = %(<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#07080c"/><path fill="#ecebf5" fill-rule="evenodd" transform="translate(3.2 3.2) scale(.8)" d="M16 2C22.3 2 26 7 26 13.6C26 21 21.6 27.4 16 30C10.4 27.4 6 21 6 13.6C6 7 9.7 2 16 2ZM9.6 15.4a2.6 4.9 0 1 0 5.2 0a2.6 4.9 0 1 0 -5.2 0ZM17.2 15.4a2.6 4.9 0 1 0 5.2 0a2.6 4.9 0 1 0 -5.2 0Z"/></svg>)
+    FAVICON  = "data:image/svg+xml," + URI.encode_path(ICON_SVG)
 
     def self.page(title : String, body : String, nonce : String? = nil) : String
       <<-HTML
         <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-        <title>#{HTML.escape(title)}</title><style#{nonce ? %( nonce="#{nonce}") : ""}>#{INTERNAL_CSS}</style></head><body>#{body}</body></html>
+        <title>#{HTML.escape(title)}</title><link rel="icon" href="#{FAVICON}"><style#{nonce ? %( nonce="#{nonce}") : ""}>#{INTERNAL_CSS}</style></head><body>#{body}</body></html>
         HTML
     end
   end
@@ -84,11 +87,11 @@ module Silth
       title = HTTP::Status.new(status).description || "Error"
       Brand.page("#{status} · #{title}", <<-HTML, nonce)
         <main class="s-center"><div>
-          <div class="s-glyph" style="width:72px;margin:0 auto 12px">#{Brand::LOGO_SVG}</div>
+          <div class="s-glyph" style="width:40px;height:40px;margin:0 auto">#{Brand::LOGO_SVG.sub(%(class="s-mark"), %(width="40" height="40"))}</div>
           <p class="s-big">#{status}</p>
           <h1 class="s-title">#{HTML.escape(title)}</h1>
           <p class="s-sub" style="max-width:460px;margin:8px auto 22px">#{HTML.escape(message)}</p>
-          <a class="s-badge info" href="/">← Back to the surface</a>
+          <a class="s-btn" href="/">Back to home</a>
         </div></main>
         HTML
     end
@@ -118,7 +121,7 @@ module Silth
       cause = ex.cause.try { |c| %(<p class="s-sub">Caused by <span class="s-error-class">#{HTML.escape(c.class.name)}</span>: #{HTML.escape(c.message || "")}</p>) } || ""
       body = <<-HTML
         <div class="s-wrap">
-          <div class="s-brand">#{Brand::LOGO_SVG} Silth · Debug</div>
+          <div class="s-brand" style="margin-bottom:16px">#{Brand::LOGO_SVG} silth <small>debug</small></div>
           <div class="s-card">
             <div class="s-error-class">#{HTML.escape(ex.class.name)}</div>
             <h1 class="s-title">#{HTML.escape(ex.message || "(no message)")}</h1>
@@ -126,7 +129,7 @@ module Silth
             #{cause}
             #{excerpt}
           </div>
-          <div class="s-card"><h3 style="margin-top:0">Backtrace</h3>#{trace.empty? ? %(<p class="s-muted">No backtrace available — build with debug info.</p>) : trace}</div>
+          <div class="s-card"><h3 style="margin-top:0">Backtrace</h3>#{trace.empty? ? %(<p class="s-muted">No backtrace available: build with debug info.</p>) : trace}</div>
           <div class="s-card"><h3 style="margin-top:0">Request</h3>#{kv(request_info(ctx))}</div>
           <div class="s-card"><h3 style="margin-top:0">Params</h3>#{kv(ctx.params?.try(&.to_h) || {} of String => String)}</div>
           <div class="s-card"><h3 style="margin-top:0">Headers</h3>#{kv(ctx.request.headers.to_h.transform_values(&.join(", ")))}</div>

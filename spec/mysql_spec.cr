@@ -219,6 +219,14 @@ describe "MySQL authentication (fake server)" do
     port = MySQLSpec.fake_server([switch, ok, ok]) # auth OK, then SET NAMES
     MySQLSpec.connect("mysql://app:secret@127.0.0.1:#{port}/app", allow_cleartext_password: true).close
   end
+
+  it "names the plugin when the server asks for one it does not support (MariaDB ed25519)" do
+    switch = Bytes[0xFE] + "client_ed25519\0".to_slice + Bytes.new(32, 7_u8)
+    port = MySQLSpec.fake_server([switch])
+    expect_raises(Silth::DB::ConnectionError, /plugin client_ed25519 is not supported/) do
+      MySQLSpec.connect("mysql://app:secret@127.0.0.1:#{port}/app")
+    end
+  end
 end
 
 if url = MySQLSpec.url

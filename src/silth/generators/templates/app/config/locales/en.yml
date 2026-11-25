@@ -1,6 +1,6 @@
 en:
   app:
-    tagline: "Forged in the dark. Built to last."
+    tagline: "Your Silth app is up. Edit src/views/home/index.html.ecr to make it yours."
   nav:
     home: Home
     login: Sign in
