@@ -1,7 +1,6 @@
-# Multi-stage build on the official Silth images (see docker/ in the Silth
-# repository). Override them with --build-arg SILTH_BUILDER=… / SILTH_RUNTIME=….
-ARG SILTH_BUILDER=ghcr.io/killidia/silth-builder:1.22
-ARG SILTH_RUNTIME=ghcr.io/killidia/silth-runtime:3.20
+# Multi-stage build on the official Silth images (docker/ in silthhq/framework). Override them with --build-arg SILTH_BUILDER=… / SILTH_RUNTIME=….
+ARG SILTH_BUILDER=ghcr.io/silthhq/builder:1.22
+ARG SILTH_RUNTIME=ghcr.io/silthhq/runtime:3.20
 
 FROM ${SILTH_BUILDER} AS build
 WORKDIR /app

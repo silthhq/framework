@@ -1,0 +1,9 @@
+/lib/
+/bin/
+/.shards/
+/tmp/
+/spec/tmp/
+*.dwarf
+.DS_Store
+.env
+.env.local

@@ -1,8 +1,6 @@
-# Build context of docker/builder.Dockerfile (repository root): only framework/ is used.
+# Build context of docker/builder.Dockerfile (this repository).
 .git
-website
-docs
-skills
-framework/bin
-framework/lib
-framework/tmp
+bin
+lib
+tmp
+spec/tmp

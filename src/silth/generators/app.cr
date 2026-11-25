@@ -28,7 +28,7 @@ module Silth::Generators
       if path = @silth_path
         "    path: #{path}"
       else
-        "    github: silth-framework/silth\n    branch: main"
+        "    github: silthhq/framework\n    branch: main"
       end
     end
 

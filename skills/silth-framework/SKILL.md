@@ -1,6 +1,6 @@
 ---
 name: silth-framework
-description: Work on the Silth framework itself (the monorepo with framework/, website/, docs/, skills/) — adding modules, fixing drivers, macros, the CLI, generators, docs or the website. Use when editing files under framework/src/silth or when the user asks to extend Silth.
+description: Work on the Silth framework itself (silthhq/framework) — adding modules, fixing drivers, macros, the CLI, generators or the Docker images. Use when editing files under src/silth of the framework repository or when the user asks to extend Silth.
 ---
 
 # Contributing to Silth
@@ -8,38 +8,36 @@ description: Work on the Silth framework itself (the monorepo with framework/, w
 ## Layout
 
 ```
-framework/                the `silth` shard
-  src/silth.cr            requires every module (order matters)
-  src/silth/<module>.cr   one file per module (cache, queue, mailer, live, …)
-  src/silth/db/           pool, dialects, query builder, schema, migrations, drivers/{postgres,mysql,sqlite}
-                          (drivers/mysql/: codec.cr = text/binary value encoding, rsa.cr = RSA-OAEP auth)
-  src/silth/orm/          Model macros, typed Query(T), casting
-  src/silth/view/         ECR processor (run macro), helpers, form builder
-  src/silth/cli/          Command base, built-in commands
-  src/silth/generators/   generators + templates/app (embedded at compile time by embed.cr)
-  src/silth/assets/       silth.js (client runtime), livereload.js, internal.css
-  src/cli/main.cr         global `silth` binary
-  spec/                   framework specs (fixtures in spec/fixtures)
-website/                  silth.dev, a Silth app (dogfooding) reading ../docs
-docs/                     Markdown docs + _nav.yml (source of the website and llms.txt)
-skills/                   agent skills (silth = app development, silth-framework = this one)
+src/silth.cr            requires every module (order matters)
+src/silth/<module>.cr   one file per module (cache, queue, mailer, live, …)
+src/silth/db/           pool, dialects, query builder, schema, migrations, schema dump, drivers/{postgres,mysql,sqlite}
+                        (drivers/mysql/: codec.cr = text/binary value encoding, rsa.cr = RSA-OAEP auth)
+src/silth/orm/          Model macros, typed Query(T), casting
+src/silth/view/         ECR processor (run macro), helpers, form builder
+src/silth/cli/          Command base, built-in commands
+src/silth/generators/   generators + templates/app (embedded at compile time by embed.cr)
+src/silth/assets/       silth.js (client runtime), livereload.js, internal.css
+src/cli/main.cr         global `silth` binary
+spec/                   framework specs (fixtures in spec/fixtures)
+skills/                 agent skills (silth = app development, silth-framework = this one)
+docker/                 official images (builder, runtime) published by .github/workflows/docker-images.yml
 ```
+
+Documentation: silthhq/website, `docs/` (Markdown + `_nav.yml`, also served as llms.txt).
 
 ## Commands
 
 ```bash
-cd framework
 crystal spec                                              # SQLite in memory
 SILTH_TEST_DATABASE_URL=postgres://silth:silth@127.0.0.1:55432/silth_test crystal spec
 SILTH_TEST_DATABASE_URL=mysql://silth:silth@127.0.0.1:53306/silth_test crystal spec
 SILTH_TEST_DATABASE_URL=mysql://silth:silth@127.0.0.1:53307/silth_test SILTH_TEST_MYSQL_ADMIN_URL=mysql://root:silth@127.0.0.1:53307/silth_test crystal spec spec/mysql_spec.cr
-docker compose -f ../docker-compose.yml up -d             # pgvector + MariaDB + MySQL 8.4 + Redis + Mailpit + MinIO + Jaeger
+docker compose up -d                                      # pgvector + MariaDB + MySQL 8.4 + Redis + Mailpit + MinIO + Jaeger
 shards build silth                                        # global CLI → bin/silth
 bin/silth new /tmp/demo --path-to-silth=$PWD              # end-to-end check of templates
-cd ../website && ../framework/bin/silth export -o dist    # static site
 ```
 
-After editing `templates/app` or `skills/silth`, run `bin/sync-skills` (copies the skill into the template) and rebuild `bin/silth` (templates are embedded at compile time).
+After editing `templates/app` or `skills/silth`, run `scripts/sync-skills` (copies the skill into the template) and rebuild `bin/silth` (templates are embedded at compile time).
 
 ## Rules
 
