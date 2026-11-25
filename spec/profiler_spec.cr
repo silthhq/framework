@@ -52,6 +52,7 @@ describe Silth::Profiler do
     p.spans << span.call("db", "SELECT sessions", 1.0, 1.0)
     p.spans << span.call("controller", "PostsController#show", 5.0, 40.0)
     p.spans << span.call("db", "SELECT comments", 6.0, 0.5)
+    p.spans << span.call("cache", "set comments", 6.2, nil)
     p.spans << span.call("db", "SELECT comments", 7.0, 0.5)
     p.spans << span.call("view", "posts/show.html.ecr", 10.0, 20.0)
     p.spans << span.call("db", "SELECT authors", 12.0, 1.0)
@@ -63,6 +64,7 @@ describe Silth::Profiler do
       {"SELECT sessions", 2},
       {"PostsController#show", 1},
       {"SELECT comments", 2},
+      {"set comments", 2}, # during the query, not inside it
       {"SELECT comments", 2},
       {"posts/show.html.ecr", 2},
       {"SELECT authors", 3},

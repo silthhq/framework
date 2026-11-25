@@ -16,6 +16,8 @@ module Silth
       record Row, span : Span, depth : Int32, end_ms : Float64
 
       KIND_ORDER = {"request" => 0, "phase" => 1, "controller" => 2, "view" => 3, "component" => 4}
+      # Spans that never contain other spans: what happens during them is their sibling.
+      LEAVES = {"db", "http"}
       LEGEND     = {"controller" => "Action", "view" => "Templates", "db" => "Database", "http" => "HTTP / jobs / mails", "log" => "Logs", "cache" => "Cache / events"}
 
       def self.rows(p : Profile) : Array(Row)
@@ -37,7 +39,7 @@ module Silth
             stack.pop
           end
           depth = stack.size
-          stack << finish unless s.instant
+          stack << finish unless s.instant || LEAVES.includes?(s.kind)
           Row.new(s, depth, finish)
         end
       end
