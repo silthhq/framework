@@ -20,6 +20,15 @@ module Silth
   # SendInvoiceJob.new(invoice.id).dispatch(delay: 10.minutes)
   # ```
   #
+  # Unique and rate-limited jobs:
+  #
+  # ```
+  # class SyncStockJob < Silth::Job
+  #   unique for: 10.minutes      # dispatch is skipped (nil) while one with the same arguments waits or runs
+  #   rate_limit 30, per: 1.minute # across every worker (through the cache store)
+  # end
+  # ```
+  #
   # Run workers with `silth queue:work --queues=default,mail --concurrency=8`.
   abstract class Job
     include JSON::Serializable
@@ -30,7 +39,52 @@ module Silth
     @[JSON::Field(ignore: true)]
     property job_id : String = ""
 
+    # The batch this job belongs to (see `Silth::Batch`).
+    @[JSON::Field(key: "__batch")]
+    property batch_id : String? = nil
+
+    # Set on the `on_success`/`on_failure`/`on_complete` job of a batch.
+    @[JSON::Field(key: "__batch_callback")]
+    property callback_batch_id : String? = nil
+
     abstract def perform : Nil
+
+    # The batch this job belongs to, or reports on as a callback.
+    def batch : Batch?
+      (batch_id || callback_batch_id).try { |id| Batch.find(id) }
+    end
+
+    # Duplicate window of `unique` jobs (nil: not unique).
+    def self.unique_for : Time::Span?
+      nil
+    end
+
+    # `{limit, period}` shared by every job of this class (nil: unlimited).
+    def self.rate_limit : {Int32, Time::Span}?
+      nil
+    end
+
+    # Only one job with the same `unique_key` can wait or run at a time: `dispatch`
+    # returns nil for duplicates. The lock is released when the job succeeds or
+    # fails for good, or after *duration* at most (a crashed worker).
+    macro unique(for duration = 1.hour)
+      def self.unique_for : Time::Span?
+        {{duration}}
+      end
+    end
+
+    # At most *limit* jobs of this class start per *period*, across workers. Extra
+    # jobs are put back until the next window (retries are not consumed).
+    macro rate_limit(limit, per period = 1.second)
+      def self.rate_limit : {Int32, Time::Span}?
+        { {{limit}}, {{period}} }
+      end
+    end
+
+    # What makes two jobs duplicates (default: the class and its arguments).
+    def unique_key : String
+      Crypto.sha256("#{self.class.name}:#{to_json}")[0, 40]
+    end
 
     def self.queue_name : String
       "default"
@@ -75,7 +129,8 @@ module Silth
       self.class.name
     end
 
-    def dispatch(delay : Time::Span? = nil, queue : String? = nil) : String
+    # Queues the job; returns its id, or nil when a `unique` duplicate is pending.
+    def dispatch(delay : Time::Span? = nil, queue : String? = nil) : String?
       Queue.push(self, queue || self.class.queue_name, delay)
     end
 
@@ -118,8 +173,14 @@ module Silth
       abstract def push(envelope : Envelope) : Nil
       abstract def pop(queues : Array(String)) : Envelope?
       abstract def ack(envelope : Envelope) : Nil
-      abstract def release(envelope : Envelope, delay : Time::Span) : Nil
+      # Puts a job back; *attempt* is false when it did not run (rate limit).
+      abstract def release(envelope : Envelope, delay : Time::Span, attempt : Bool = true) : Nil
       abstract def size(queue : String) : Int64
+
+      # False when jobs run inline (rate limits would loop).
+      def deferred? : Bool
+        true
+      end
 
       def fail(envelope : Envelope, error : Exception) : Nil
         Queue.record_failure(envelope, error)
@@ -140,8 +201,12 @@ module Silth
       def ack(envelope : Envelope) : Nil
       end
 
-      def release(envelope : Envelope, delay : Time::Span) : Nil
-        Queue.execute(envelope.copy_with(attempts: envelope.attempts + 1), self)
+      def release(envelope : Envelope, delay : Time::Span, attempt : Bool = true) : Nil
+        Queue.execute(envelope.copy_with(attempts: envelope.attempts + (attempt ? 1 : 0)), self)
+      end
+
+      def deferred? : Bool
+        false
       end
 
       def fail(envelope : Envelope, error : Exception) : Nil
@@ -173,8 +238,8 @@ module Silth
       def ack(envelope : Envelope) : Nil
       end
 
-      def release(envelope : Envelope, delay : Time::Span) : Nil
-        push(envelope.copy_with(attempts: envelope.attempts + 1, available_at: Time.utc + delay))
+      def release(envelope : Envelope, delay : Time::Span, attempt : Bool = true) : Nil
+        push(envelope.copy_with(attempts: envelope.attempts + (attempt ? 1 : 0), available_at: Time.utc + delay))
       end
 
       def size(queue : String) : Int64
@@ -239,8 +304,8 @@ module Silth
         db.table(TABLE).where(uid: envelope.id).delete
       end
 
-      def release(envelope : Envelope, delay : Time::Span) : Nil
-        db.table(TABLE).where(uid: envelope.id).update(reserved_at: nil, token: nil, attempts: envelope.attempts + 1, available_at: Time.utc + delay)
+      def release(envelope : Envelope, delay : Time::Span, attempt : Bool = true) : Nil
+        db.table(TABLE).where(uid: envelope.id).update(reserved_at: nil, token: nil, attempts: envelope.attempts + (attempt ? 1 : 0), available_at: Time.utc + delay)
       end
 
       def size(queue : String) : Int64
@@ -286,8 +351,8 @@ module Silth
       def ack(envelope : Envelope) : Nil
       end
 
-      def release(envelope : Envelope, delay : Time::Span) : Nil
-        push(envelope.copy_with(attempts: envelope.attempts + 1, available_at: Time.utc + delay))
+      def release(envelope : Envelope, delay : Time::Span, attempt : Bool = true) : Nil
+        push(envelope.copy_with(attempts: envelope.attempts + (attempt ? 1 : 0), available_at: Time.utc + delay))
       end
 
       def size(queue : String) : Int64
@@ -315,8 +380,11 @@ module Silth
       @@driver = driver
     end
 
-    def self.push(job : Job, queue : String, delay : Time::Span? = nil) : String
+    def self.push(job : Job, queue : String, delay : Time::Span? = nil) : String?
       id = Crypto.uuid7
+      if ttl = job.class.unique_for
+        return nil unless Silth.cache.add(unique_lock(job), id, ttl)
+      end
       if faked = @@faked
         job.job_id = id
         faked << job
@@ -333,12 +401,23 @@ module Silth
       job = Job.deserialize(envelope.job, envelope.payload)
       job.attempts = envelope.attempts
       job.job_id = envelope.id
+      if driver.deferred? && (wait = throttle(envelope.queue, job))
+        driver.release(envelope, wait, attempt: false)
+        return
+      end
+      if (batch_id = job.batch_id) && Batch.cancelled?(batch_id)
+        driver.ack(envelope)
+        finished(job, envelope, failed: false)
+        Log.info { "Skipped #{envelope.job} (batch #{batch_id} cancelled)" }
+        return
+      end
       started = Time.instant
       begin
         Telemetry.trace("job #{envelope.job}", :consumer, {"messaging.destination.name" => envelope.queue}) do
           Concurrency.timeout(job.class.timeout) { job.perform; nil }
         end
         driver.ack(envelope)
+        finished(job, envelope, failed: false)
         Instrument.publish(Instrument::Job.new(envelope.job, envelope.queue, "processed", Time.instant - started))
         Log.info { "Processed #{envelope.job} (#{(Time.instant - started).total_milliseconds.round(1)}ms)" }
       rescue ex
@@ -352,11 +431,50 @@ module Silth
           job.failed(ex) rescue nil
           ErrorReporter.report(ex)
           driver.fail(envelope, ex)
+          finished(job, envelope, failed: true)
         end
       end
     end
 
+    # A job is done for good: release its unique lock, update its batch.
+    private def self.finished(job : Job, envelope : Envelope, failed : Bool) : Nil
+      Silth.cache.delete(unique_lock(job)) if job.class.unique_for
+      job.batch_id.try { |id| Batch.job_processed(id, envelope.id, failed) }
+    end
+
+    private def self.unique_lock(job : Job) : String
+      "silth:unique-job:#{job.unique_key}"
+    end
+
+    # Time to wait when the queue's or the job's rate limit is reached (nil: go).
+    def self.throttle(queue : String, job : Job) : Time::Span?
+      limits = [] of {String, Int32, Time::Span}
+      rate_limit(queue).try { |(limit, period)| limits << {"queue:#{queue}", limit, period} }
+      job.class.rate_limit.try { |(limit, period)| limits << {"job:#{job.class.name}", limit, period} }
+      limits.each do |(key, limit, period)|
+        result = RateLimit.hit("silth:#{key}", limit, period)
+        return (result.retry_after.seconds + rand(250).milliseconds) unless result.allowed?
+      end
+      nil
+    end
+
+    # `queue.rate_limits` in config/queue.yml: `{mail: "10/1s", api: "100/1m"}`.
+    def self.rate_limit(queue : String) : {Int32, Time::Span}?
+      spec = Silth.config.string?("queue.rate_limits.#{queue}") || return nil
+      m = spec.match(/\A(\d+)\s*\/\s*(\d*)\s*(s|m|h)\z/) || raise ConfigError.new("Invalid rate limit '#{spec}' for queue #{queue} (use 10/1s, 100/1m, 1000/1h)")
+      amount = m[2].empty? ? 1 : m[2].to_i
+      period = case m[3]
+               when "s" then amount.seconds
+               when "m" then amount.minutes
+               else          amount.hours
+               end
+      {m[1].to_i, period}
+    end
+
+    # Creates the queue tables when missing (no DDL otherwise: on MySQL it would
+    # commit the transaction a job is dispatched from).
     def self.ensure_tables(db : DB::Database) : Nil
+      return if db.table_exists?(DatabaseDriver::TABLE) && db.table_exists?("silth_failed_jobs")
       schema = DB::Schema.new(db)
       schema.create_table(DatabaseDriver::TABLE, if_not_exists: true) do |t|
         t.id

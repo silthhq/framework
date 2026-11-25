@@ -38,8 +38,8 @@ module Silth::DB
       DSL_TYPES.includes?(sql) ? sql.upcase : sql
     end
 
-    # Framework tables that are not part of the application schema.
-    IGNORED_TABLES = [Migrator::TABLE, "silth_pubsub_messages"]
+    # Framework tables created on demand, not part of the application schema.
+    IGNORED_TABLES = [Migrator::TABLE, "silth_pubsub_messages", "silth_jobs", "silth_failed_jobs", "silth_job_batches"]
 
     getter db : Database
 
