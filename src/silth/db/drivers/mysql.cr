@@ -15,7 +15,8 @@ module Silth::DB::MySQL
   #
   # Auth plugins: `mysql_native_password`, `caching_sha2_password` and
   # `sha256_password` (full authentication over TLS, or with the password encrypted
-  # with the server's RSA public key on plain TCP), and auth switch.
+  # with the server's RSA public key on plain TCP), `mysql_clear_password` (TLS
+  # only) and auth switch. MariaDB's `ed25519` and `parsec` are not supported yet.
   #
   # ```text
   # mysql://user:pass@host:3306/app?ssl=true                        # TLS
@@ -259,7 +260,7 @@ module Silth::DB::MySQL
         full_auth_payload(password, scramble, request_key: SHA256_REQUEST_KEY)
       when "mysql_clear_password"
         cleartext_password(password)
-      else
+      when "mysql_native_password", ""
         s1 = digest_sha1(password.to_slice)
         s2 = digest_sha1(s1)
         joined = Bytes.new(scramble.size + s2.size)
@@ -267,6 +268,12 @@ module Silth::DB::MySQL
         s2.copy_to(joined + scramble.size)
         s3 = digest_sha1(joined)
         Bytes.new(s1.size) { |i| s1[i] ^ s3[i] }
+      else
+        # MariaDB `client_ed25519`, `parsec`, GSSAPI…: fail clearly instead of
+        # answering with a native hash the server can only reject.
+        raise ConnectionError.new("MySQL authentication plugin #{plugin} is not supported " \
+                                  "(supported: mysql_native_password, caching_sha2_password, sha256_password, mysql_clear_password). " \
+                                  "See https://silth.dev/docs/database/mysql#authentication")
       end
     end
 
