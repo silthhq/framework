@@ -12,7 +12,7 @@ Next iterations of stage 1:
 - [x] Named slots for components, live component file uploads, nested live components
 - [x] Redis/PostgreSQL `LISTEN/NOTIFY` pub/sub adapter configured from YAML for multi-node live components
 - [x] Job batches, unique jobs and rate-limited queues
-- [ ] Mail previews in the profiler, markdown mail templates
+- [x] Mail previews in the profiler, markdown mail templates
 - [ ] Log, cache and session drivers for PostgreSQL `UNLOGGED` tables
 - [ ] Official Docker images and a `silth deploy` preset
 

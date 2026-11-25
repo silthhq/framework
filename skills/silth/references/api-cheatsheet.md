@@ -38,7 +38,7 @@ Cache: `Silth.cache.fetch(key, 10.minutes) { … }`, `lock`, `increment`.
 Events: `Silth::Events.listen(E) { |e| }`, `dispatch`, `Listener(E)` classes (`queued`).
 Jobs: `class J < Silth::Job; queue "q"; retries 3; def perform : Nil; end; end`, `J.new(…).dispatch(delay: 5.minutes)` (→ `String?`), `silth queue:work`. `unique for: 10.minutes` (duplicates skipped, `unique_key`), `rate_limit 30, per: 1.minute`, queue limits `rate_limits: {mail: 10/1s}` in config/queue.yml. Batches: `Silth::Batch.dispatch(jobs, on_success: J.new, on_failure: J.new, on_complete: J.new, allow_failures: false)`, `batch.progress`, `batch.cancel`, `batch` inside jobs.
 Schedule: `Silth.schedule { |s| s.job(J.new).daily_at("03:00") }`.
-Mail: `class M < Silth::Mail; def build : Nil; to …; subject …; html render_to_string("mails/x", layout: "layouts/mail", …); end; end`, `.deliver` / `.deliver_later`.
+Mail: `class M < Silth::Mail; def build : Nil; to …; subject …; html render_to_string("mails/x", layout: "layouts/mail", …); end; end`, `.deliver` / `.deliver_later`. Markdown: `markdown "mails/x", user: u` (src/views/mails/x.md.ecr, `<%= button "Label", url %>`, `<%= panel "…" %>`, text body generated). Previews: `class MPreview < Silth::MailPreview; def x : Silth::Mail; M.new(…); end; end` → /_silth/profiler/mails.
 Notifications: `class N < Silth::Notification; def via(n) : Array(Symbol); [:mail, :database]; end; end`, `user.notify(N.new)`.
 Storage: `Silth.storage.put/get?/read/url/temporary_url/put_file`, disks local|s3|memory.
 HTTP: `Silth::HTTPClient.new.bearer(t).retry(3).get(url).json`.

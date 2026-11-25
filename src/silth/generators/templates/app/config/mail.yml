@@ -7,6 +7,10 @@ port: ${MAIL_PORT:-587}
 username: ${MAIL_USERNAME:-}
 password: ${MAIL_PASSWORD:-}
 encryption: starttls      # starttls | tls | none
+# Markdown mails (`markdown "mails/…"` in mail classes):
+# markdown:
+#   color: "#5b4fd6"
+#   footer: "© Acme, 1 rue de la Paix, Paris"
 
 when@test:
   driver: memory
