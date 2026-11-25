@@ -202,6 +202,11 @@ module Silth::DB
       timestamp(:deleted_at, index: true)
     end
 
+    # Integer column used by `optimistic_locking` in models.
+    def lock_version(name : String | Symbol = :lock_version) : ColumnDef
+      integer(name, null: false, default: 0)
+    end
+
     def index(columns : String | Symbol | Array, unique : Bool = false, name : String? = nil, using : String? = nil,
               where : String? = nil, opclass : String? = nil) : Nil
       cols = columns.is_a?(Array) ? columns.map(&.to_s) : [columns.to_s]

@@ -50,6 +50,10 @@ module SchemaSpec
     Silth::DB::SchemaDumper.new(Silth::DB.connection).dump
   end
 
+  def self.version : Int64
+    Silth::Migrator.new.applied.keys.max
+  end
+
   # A dump written by the dumper itself (spec/fixtures/schema), compiled in as code.
   # MariaDB reports a few things differently from MySQL 8, the fixture's source.
   def self.fixture(dialect : String) : {Silth::DB::SchemaDefinition, String}?
@@ -102,7 +106,7 @@ end
 describe Silth::DB::SchemaDumper do
   it "writes tables, columns, defaults and indexes as the schema DSL" do
     dump = SchemaSpec.dump
-    dump.should contain(%(Silth::DB::SchemaDefinition.define(version: #{CreateNotes.version}) do |s|))
+    dump.should contain(%(Silth::DB::SchemaDefinition.define(version: #{SchemaSpec.version}) do |s|))
     dump.should contain(%(  s.create_table "notes" do |t|\n    t.id\n))
     dump.should contain(%(t.string "title", null: false, limit: 255))
     dump.should contain(%(t.integer "views", default: 0))
@@ -118,7 +122,8 @@ describe Silth::DB::SchemaDumper do
 
   it "reloads to the same schema" do
     before = SchemaSpec.dump
-    Silth::DB::SchemaDefinition.new(CreateNotes.version, nil) { |s| CreateNotes.new(s).up }.load(Silth::DB.connection)
+    migrations = Silth::Migrator.new.migrations_for_db
+    Silth::DB::SchemaDefinition.new(SchemaSpec.version, nil) { |s| migrations.each(&.new(s).up) }.load(Silth::DB.connection)
     SchemaSpec.dump.should eq(before)
     Silth::Migrator.new.pending.should be_empty
   end
@@ -129,8 +134,8 @@ describe Silth::DB::SchemaDumper do
     begin
       definition.load(Silth::DB.connection)
       SchemaSpec.dump.should eq(text)
-    ensure # MySQL commits DDL: drop the fixture's extra tables
-      %w(note_tags tags events).each { |t| Silth::DB::Schema.new.drop_table(t) } if dialect == "mysql"
+    ensure # MySQL commits DDL: put the spec schema back
+      Silth::Migrator.new.fresh if dialect == "mysql"
     end
   end
 end
