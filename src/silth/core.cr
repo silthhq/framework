@@ -138,9 +138,7 @@ module Silth
   # :nodoc:
   def self.boot_subsystems : Nil
     DB.boot
-    if config.string("realtime.pubsub", "memory") == "redis"
-      PubSub.boot_redis(config.string("realtime.redis_url", ENV["REDIS_URL"]? || "redis://localhost:6379/0"))
-    end
+    PubSub.boot(config)
     Telemetry.boot
     Profiler.boot
     Events.boot
