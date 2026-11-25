@@ -22,6 +22,7 @@ module Silth::DB::MySQL
   # mysql://user:pass@host:3306/app?statement_cache_size=512        # prepared statements kept per connection (0: close after use)
   # mysql://user:pass@host:3306/app?prepared_statements=false       # client-side interpolation, text protocol only
   # mysql://user:pass@host:3306/app?server_public_key=/etc/mysql/public_key.pem  # pin the RSA key instead of fetching it
+  # mysql://user:pass@host:3306/app?allow_cleartext_password=true   # LDAP/PAM accounts on plain TCP (avoid)
   # ```
   class Connection < Silth::DB::Connection
     LE = IO::ByteFormat::LittleEndian
@@ -64,9 +65,11 @@ module Silth::DB::MySQL
     record Statement, id : UInt32, params : Int32
 
     # Driver options read from the connection URL query string.
-    record Options, prepared_statements : Bool = true, statement_cache_size : Int32 = DEFAULT_STATEMENT_CACHE_SIZE, server_public_key : String? = nil do
+    record Options, prepared_statements : Bool = true, statement_cache_size : Int32 = DEFAULT_STATEMENT_CACHE_SIZE,
+      server_public_key : String? = nil, allow_cleartext_password : Bool = false do
       def self.parse(params : URI::Params) : Options
         prepared = !%w(false 0 no off).includes?(params["prepared_statements"]? || "")
+        cleartext = %w(true 1 yes on).includes?(params["allow_cleartext_password"]? || "")
         cache_size = DEFAULT_STATEMENT_CACHE_SIZE
         if size = params["statement_cache_size"]?
           cache_size = size.to_i?.try { |n| n >= 0 ? n : nil } ||
@@ -75,7 +78,7 @@ module Silth::DB::MySQL
         key = params["server_public_key"]?.try do |path|
           File.read(path) rescue raise ConnectionError.new("Cannot read MySQL server public key #{path}")
         end
-        new(prepared, cache_size, key)
+        new(prepared, cache_size, key, cleartext)
       end
     end
 
@@ -255,7 +258,7 @@ module Silth::DB::MySQL
       when "sha256_password"
         full_auth_payload(password, scramble, request_key: SHA256_REQUEST_KEY)
       when "mysql_clear_password"
-        (password + "\0").to_slice
+        cleartext_password(password)
       else
         s1 = digest_sha1(password.to_slice)
         s2 = digest_sha1(s1)
@@ -265,6 +268,17 @@ module Silth::DB::MySQL
         s3 = digest_sha1(joined)
         Bytes.new(s1.size) { |i| s1[i] ^ s3[i] }
       end
+    end
+
+    # `mysql_clear_password` (LDAP/PAM accounts) sends the password as is: only over
+    # TLS, or when the URL opts in with `allow_cleartext_password=true`. Otherwise a
+    # man in the middle could ask for it with an auth switch and read it.
+    private def cleartext_password(password : String) : Bytes
+      unless @tls || @options.allow_cleartext_password
+        raise ConnectionError.new("MySQL server asked for the cleartext password over an unencrypted connection; " \
+                                  "use TLS (?ssl=true) or allow it explicitly with ?allow_cleartext_password=true")
+      end
+      (password + "\0").to_slice
     end
 
     # AuthMoreData: a caching_sha2_password status byte, or the RSA public key we asked for.

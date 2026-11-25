@@ -207,6 +207,18 @@ describe "MySQL authentication (fake server)" do
       MySQLSpec.connect("mysql://app:secret@127.0.0.1:#{port}/app")
     end
   end
+
+  it "refuses to send the cleartext password without TLS unless allowed" do
+    switch = Bytes[0xFE] + "mysql_clear_password\0\0".to_slice
+    ok = Bytes[0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00]
+    port = MySQLSpec.fake_server([switch])
+    expect_raises(Silth::DB::ConnectionError, /cleartext password over an unencrypted connection/) do
+      MySQLSpec.connect("mysql://app:secret@127.0.0.1:#{port}/app")
+    end
+
+    port = MySQLSpec.fake_server([switch, ok, ok]) # auth OK, then SET NAMES
+    MySQLSpec.connect("mysql://app:secret@127.0.0.1:#{port}/app", allow_cleartext_password: true).close
+  end
 end
 
 if url = MySQLSpec.url

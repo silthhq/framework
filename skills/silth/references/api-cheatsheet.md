@@ -18,7 +18,7 @@ PostgreSQL: `search([:title, :body], q)`, `order_by_relevance`, `nearest(:embedd
 Relations: `belongs_to x : X, optional: true`, `has_many xs : X, through: "pivot", dependent: :destroy`, `has_one`. Many-to-many: `attach_tags`, `detach_tags`, `sync_tags`.
 Validations: presence, length, format, email, url, inclusion, exclusion, numericality, uniqueness (`{scope: [...]}`), confirmation, acceptance, `if:`. Custom: `def validate; errors.add("f", "msg"); end`.
 Raw: `Silth::DB.query(sql, args).to_hashes`, `Silth::DB.table("x")…`, `Silth::DB.transaction { }`.
-MySQL URL options: `?ssl=true`, `?statement_cache_size=256` (prepared statements per connection, `0` = close after use), `?prepared_statements=false` (client-side interpolation), `?server_public_key=path.pem` (pin the RSA key for `caching_sha2_password` without TLS).
+MySQL URL options: `?ssl=true`, `?statement_cache_size=256` (prepared statements per connection, `0` = close after use), `?prepared_statements=false` (client-side interpolation), `?server_public_key=path.pem` (pin the RSA key for `caching_sha2_password` without TLS), `?allow_cleartext_password=true` (LDAP/PAM over plain TCP, refused by default).
 
 ## Views
 Helpers: `link_to`, `button_to(text, url, method: "delete", confirm:)`, `route(name, **params)`, `form_with`, `f.text_field/text_area/select/check_box/errors_for/submit`, `t`, `l`, `paginate`, `flash_messages`, `partial "dir/_x", local: v`, `content_for`, `yield_content`, `component`, `live`, `stylesheet_tag`, `importmap_tags`, `silth_scripts`, `csrf_meta_tags`.
