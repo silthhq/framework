@@ -1,5 +1,10 @@
 driver: memory            # sync | memory | database | redis
 # url: ${REDIS_URL:-redis://localhost:6379/0}
+# Jobs started per window, per queue (see also `rate_limit` in job classes):
+# rate_limits:
+#   mail: 10/1s
+# Where batches live (default: database when configured, memory otherwise):
+# batches: database
 
 when@test:
   driver: sync

@@ -78,9 +78,14 @@ module Silth
       end
     end
 
+    # Runs the block, raising `Timeout` when it takes longer than *span*.
+    # The block runs in another fiber that shares the caller's open database
+    # transactions (the caller waits for it), so it sees the same data.
     def self.timeout(span : Time::Span, &block : -> T) : T forall T
       channel = ::Channel(T | Exception).new(1)
+      transactions = Fiber.current.silth_db_tx
       spawn do
+        Fiber.current.silth_db_tx = transactions
         channel.send(block.call)
       rescue ex
         channel.send(ex)

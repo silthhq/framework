@@ -3,3 +3,5 @@ bin
 tmp
 storage
 .env
+.env.*
+!.env.example

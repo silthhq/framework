@@ -1,4 +1,6 @@
 default: primary
+# Rewrite db/schema.cr after migrations (default: true in development).
+# schema_dump: true
 connections:
   primary:
     url: ${DATABASE_URL:-__DB_URL__}

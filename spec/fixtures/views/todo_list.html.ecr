@@ -1,0 +1,1 @@
+<ul><% items.each do |item| %><li><%= live TodoLive, key: item, label: item %></li><% end %></ul><span class="removed"><%= removed.join(",") %></span>

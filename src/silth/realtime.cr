@@ -1,67 +1,8 @@
 require "http/web_socket"
 
 module Silth
-  # Pub/sub fan-out used by channels, broadcasts and live components.
-  # In-memory by default; set `realtime.pubsub: redis` to share across servers.
-  module PubSub
-    alias Handler = Proc(String, String, Nil)
-
-    @@subscribers = {} of String => Hash(UInt64, Handler)
-    @@mutex = Mutex.new
-    @@seq = 0_u64
-    @@redis : Redis? = nil
-    @@node = Crypto.hex_token(6)
-
-    def self.subscribe(topic : String, &handler : String, String -> Nil) : UInt64
-      @@mutex.synchronize do
-        @@seq += 1
-        (@@subscribers[topic] ||= {} of UInt64 => Handler)[@@seq] = handler
-        @@seq
-      end
-    end
-
-    def self.unsubscribe(topic : String, id : UInt64) : Nil
-      @@mutex.synchronize do
-        if subs = @@subscribers[topic]?
-          subs.delete(id)
-          @@subscribers.delete(topic) if subs.empty?
-        end
-      end
-    end
-
-    def self.subscribers(topic : String) : Int32
-      @@mutex.synchronize { @@subscribers[topic]?.try(&.size) || 0 }
-    end
-
-    # Publishes `message` (JSON string) under `event` to every subscriber of `topic`.
-    def self.publish(topic : String, event : String, message : String) : Nil
-      deliver_local(topic, event, message)
-      @@redis.try &.publish("silth:pubsub", {node: @@node, topic: topic, event: event, message: message}.to_json)
-    end
-
-    def self.deliver_local(topic : String, event : String, message : String) : Nil
-      handlers = @@mutex.synchronize { @@subscribers[topic]?.try(&.values) || [] of Handler }
-      handlers.each { |h| h.call(event, message) rescue nil }
-      # Wildcard subscribers: "chat:*"
-      wildcard = topic.includes?(':') ? topic.split(':').first + ":*" : nil
-      if wildcard && wildcard != topic
-        @@mutex.synchronize { @@subscribers[wildcard]?.try(&.values) || [] of Handler }.each { |h| h.call(event, message) rescue nil }
-      end
-    end
-
-    def self.boot_redis(url : String) : Nil
-      @@redis = Redis.new(url)
-      spawn(name: "silth-pubsub") do
-        Redis.new(url).subscribe("silth:pubsub") do |_, payload|
-          data = JSON.parse(payload)
-          next if data["node"].as_s == @@node
-          deliver_local(data["topic"].as_s, data["event"].as_s, data["message"].as_s)
-        end
-      end
-    end
-  end
-
   # Push data to WebSocket clients from anywhere (controllers, jobs, listeners).
+  # Messages reach every server node through `PubSub` (see config/realtime.yml).
   #
   # ```
   # Silth::Broadcast.to("orders:#{order.id}", "status", {status: "shipped"})

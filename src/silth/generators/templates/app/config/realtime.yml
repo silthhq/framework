@@ -1,0 +1,8 @@
+# Pub/sub between server nodes: live component refreshes, channels and broadcasts.
+#   memory    one process (default)
+#   redis     Redis PUBLISH/SUBSCRIBE
+#   postgres  PostgreSQL LISTEN/NOTIFY on a database connection (no extra service)
+pubsub: ${SILTH_PUBSUB:-memory}
+redis_url: ${REDIS_URL:-redis://localhost:6379/0}
+# connection: primary        # postgres: connection from config/database.yml
+# channel: silth_pubsub      # Redis channel / PostgreSQL notification channel

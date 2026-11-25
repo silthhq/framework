@@ -2,35 +2,88 @@ require "socket"
 require "openssl"
 require "digest/sha1"
 require "digest/sha256"
+require "./mysql/codec"
+require "./mysql/rsa"
 
 module Silth::DB::MySQL
-  # Native MySQL / MariaDB driver (client/server protocol 4.1, text protocol).
+  # Native MySQL / MariaDB driver (client/server protocol 4.1).
   #
-  # Parameters are interpolated client side with strict escaping (the same strategy
-  # as PDO's emulated prepares). Auth plugins: `mysql_native_password`,
-  # `caching_sha2_password` (fast path, or full auth over TLS) and auth switch.
+  # Queries with parameters run as server-side prepared statements (binary protocol:
+  # `COM_STMT_PREPARE` then `COM_STMT_EXECUTE`), kept in a per-connection LRU cache.
+  # Queries without parameters use the text protocol (`COM_QUERY`). Statements the
+  # server cannot prepare fall back to client-side interpolation with strict escaping.
+  #
+  # Auth plugins: `mysql_native_password`, `caching_sha2_password` and
+  # `sha256_password` (full authentication over TLS, or with the password encrypted
+  # with the server's RSA public key on plain TCP), and auth switch.
+  #
+  # ```text
+  # mysql://user:pass@host:3306/app?ssl=true                        # TLS
+  # mysql://user:pass@host:3306/app?statement_cache_size=512        # prepared statements kept per connection (0: close after use)
+  # mysql://user:pass@host:3306/app?prepared_statements=false       # client-side interpolation, text protocol only
+  # mysql://user:pass@host:3306/app?server_public_key=/etc/mysql/public_key.pem  # pin the RSA key instead of fetching it
+  # mysql://user:pass@host:3306/app?allow_cleartext_password=true   # LDAP/PAM accounts on plain TCP (avoid)
+  # ```
   class Connection < Silth::DB::Connection
     LE = IO::ByteFormat::LittleEndian
 
-    CLIENT_LONG_PASSWORD     = 0x00000001_u32
-    CLIENT_FOUND_ROWS        = 0x00000002_u32
-    CLIENT_LONG_FLAG         = 0x00000004_u32
-    CLIENT_CONNECT_WITH_DB   = 0x00000008_u32
-    CLIENT_PROTOCOL_41       = 0x00000200_u32
-    CLIENT_SSL               = 0x00000800_u32
-    CLIENT_TRANSACTIONS      = 0x00002000_u32
-    CLIENT_SECURE_CONNECTION = 0x00008000_u32
-    CLIENT_MULTI_STATEMENTS  = 0x00010000_u32
-    CLIENT_MULTI_RESULTS     = 0x00020000_u32
-    CLIENT_PLUGIN_AUTH       = 0x00080000_u32
+    CLIENT_LONG_PASSWORD      = 0x00000001_u32
+    CLIENT_FOUND_ROWS         = 0x00000002_u32
+    CLIENT_LONG_FLAG          = 0x00000004_u32
+    CLIENT_CONNECT_WITH_DB    = 0x00000008_u32
+    CLIENT_PROTOCOL_41        = 0x00000200_u32
+    CLIENT_SSL                = 0x00000800_u32
+    CLIENT_TRANSACTIONS       = 0x00002000_u32
+    CLIENT_SECURE_CONNECTION  = 0x00008000_u32
+    CLIENT_MULTI_STATEMENTS   = 0x00010000_u32
+    CLIENT_MULTI_RESULTS      = 0x00020000_u32
+    CLIENT_PLUGIN_AUTH        = 0x00080000_u32
     CLIENT_PLUGIN_AUTH_LENENC = 0x00200000_u32
 
     SERVER_MORE_RESULTS     = 0x0008
     SERVER_NO_BACKSLASH_ESC = 0x0200
 
-    record Column, name : String, type : UInt8, charset : UInt16, length : UInt32
+    COM_QUIT         = 0x01_u8
+    COM_QUERY        = 0x03_u8
+    COM_STMT_PREPARE = 0x16_u8
+    COM_STMT_CLOSE   = 0x19_u8
+
+    # caching_sha2_password / sha256_password exchanges
+    FAST_AUTH_SUCCESS           = 3_u8
+    PERFORM_FULL_AUTHENTICATION = 4_u8
+    CACHING_SHA2_REQUEST_KEY    = 2_u8
+    SHA256_REQUEST_KEY          = 1_u8
+
+    # Server errors handled by the prepared statement path
+    ER_UNSUPPORTED_PS                  = "1295"
+    ER_MAX_PREPARED_STMT_COUNT_REACHED = "1461"
+    ER_NEED_REPREPARE                  = "1615"
+
+    DEFAULT_STATEMENT_CACHE_SIZE = 256
+
+    # A server-side prepared statement.
+    record Statement, id : UInt32, params : Int32
+
+    # Driver options read from the connection URL query string.
+    record Options, prepared_statements : Bool = true, statement_cache_size : Int32 = DEFAULT_STATEMENT_CACHE_SIZE,
+      server_public_key : String? = nil, allow_cleartext_password : Bool = false do
+      def self.parse(params : URI::Params) : Options
+        prepared = !%w(false 0 no off).includes?(params["prepared_statements"]? || "")
+        cleartext = %w(true 1 yes on).includes?(params["allow_cleartext_password"]? || "")
+        cache_size = DEFAULT_STATEMENT_CACHE_SIZE
+        if size = params["statement_cache_size"]?
+          cache_size = size.to_i?.try { |n| n >= 0 ? n : nil } ||
+                       raise ConnectionError.new("Invalid statement_cache_size '#{size}' (expected an integer >= 0)")
+        end
+        key = params["server_public_key"]?.try do |path|
+          File.read(path) rescue raise ConnectionError.new("Cannot read MySQL server public key #{path}")
+        end
+        new(prepared, cache_size, key, cleartext)
+      end
+    end
 
     getter server_version = ""
+    getter options : Options
     @io : IO
     @seq = 0_u8
     @closed = false
@@ -38,6 +91,8 @@ module Silth::DB::MySQL
     @no_backslash_escapes = false
     @dialect = Dialect::MySQL.new
     @mutex = Mutex.new
+    @statements = {} of String => Statement
+    @public_key_requested = false
 
     def initialize(url : URI)
       host = url.host.presence || "localhost"
@@ -47,6 +102,7 @@ module Silth::DB::MySQL
       database = url.path.lchop('/').presence
       params = url.query_params
       want_tls = %w(true required require 1 verify).includes?(params["ssl"]? || params["sslmode"]? || "")
+      @options = Options.parse(params)
 
       socket = begin
         TCPSocket.new(host, port, connect_timeout: 5.seconds)
@@ -57,8 +113,23 @@ module Silth::DB::MySQL
       socket.sync = false
       @io = socket
 
-      handshake(socket, host, user, password, database, want_tls)
+      begin
+        handshake(socket, host, user, password, database, want_tls)
+      rescue ex
+        @io.close rescue nil
+        raise ex
+      end
       exec_script("SET NAMES utf8mb4; SET time_zone = '+00:00'")
+    end
+
+    # False when the URL has `prepared_statements=false`: every query is interpolated.
+    def prepared_statements? : Bool
+      @options.prepared_statements
+    end
+
+    # Prepared statements kept open per connection (least recently used are closed).
+    def statement_cache_size : Int32
+      @options.statement_cache_size
     end
 
     def dialect : Dialect
@@ -74,10 +145,15 @@ module Silth::DB::MySQL
       @closed = true
       begin
         @seq = 0_u8
-        write_packet(Bytes[0x01])
+        write_packet(Bytes[COM_QUIT])
       rescue
       end
       @io.close rescue nil
+    end
+
+    # Number of prepared statements currently open on this connection.
+    def cached_statement_count : Int32
+      @statements.size
     end
 
     # --- handshake ---------------------------------------------------------
@@ -126,7 +202,7 @@ module Silth::DB::MySQL
         @tls = true
       end
 
-      auth = scramble_for(plugin, password, scramble)
+      auth = auth_response(plugin, password, scramble)
       response = IO::Memory.new
       response.write_bytes(flags, LE)
       response.write_bytes(16_777_216_u32, LE)
@@ -134,8 +210,7 @@ module Silth::DB::MySQL
       response.write(Bytes.new(23))
       response << user
       response.write_byte(0_u8)
-      write_lenenc_int(response, auth.size.to_u64)
-      response.write(auth)
+      Codec.write_lenenc_bytes(response, auth)
       if db = database
         response << db
         response.write_byte(0_u8)
@@ -154,29 +229,22 @@ module Silth::DB::MySQL
           return
         when 0xFF
           raise ConnectionError.new("MySQL authentication failed: #{parse_err(packet)}")
-        when 0xFE
+        when 0xFE # AuthSwitchRequest: another plugin, with a new scramble
           io = IO::Memory.new(packet[1..])
           plugin = io.gets('\0', chomp: true) || "mysql_native_password"
           rest = io.gets_to_end.to_slice
           scramble = rest.size >= 20 ? rest[0, 20] : rest
-          write_packet(scramble_for(plugin, password, scramble))
-        when 0x01
-          if packet.size > 1 && packet[1] == 3
-            next # fast auth success, OK packet follows
-          elsif packet.size > 1 && packet[1] == 4
-            if @tls
-              write_packet((password + "\0").to_slice)
-            else
-              raise ConnectionError.new("caching_sha2_password full authentication requires TLS (add ?ssl=true) or a mysql_native_password user")
-            end
-          end
+          write_packet(auth_response(plugin, password, scramble))
+        when 0x01 # AuthMoreData
+          auth_more_data(plugin, packet[1..], password, scramble)
         else
           raise ConnectionError.new("Unexpected MySQL auth packet 0x#{packet[0].to_s(16)}")
         end
       end
     end
 
-    private def scramble_for(plugin : String, password : String, scramble : Bytes) : Bytes
+    # First answer to the server for *plugin*.
+    private def auth_response(plugin : String, password : String, scramble : Bytes) : Bytes
       return Bytes.new(0) if password.empty?
       case plugin
       when "caching_sha2_password"
@@ -187,8 +255,10 @@ module Silth::DB::MySQL
         scramble.copy_to(joined + p2.size)
         p3 = digest_sha256(joined)
         Bytes.new(p1.size) { |i| p1[i] ^ p3[i] }
+      when "sha256_password"
+        full_auth_payload(password, scramble, request_key: SHA256_REQUEST_KEY)
       when "mysql_clear_password"
-        (password + "\0").to_slice
+        cleartext_password(password)
       else
         s1 = digest_sha1(password.to_slice)
         s2 = digest_sha1(s1)
@@ -197,6 +267,50 @@ module Silth::DB::MySQL
         s2.copy_to(joined + scramble.size)
         s3 = digest_sha1(joined)
         Bytes.new(s1.size) { |i| s1[i] ^ s3[i] }
+      end
+    end
+
+    # `mysql_clear_password` (LDAP/PAM accounts) sends the password as is: only over
+    # TLS, or when the URL opts in with `allow_cleartext_password=true`. Otherwise a
+    # man in the middle could ask for it with an auth switch and read it.
+    private def cleartext_password(password : String) : Bytes
+      unless @tls || @options.allow_cleartext_password
+        raise ConnectionError.new("MySQL server asked for the cleartext password over an unencrypted connection; " \
+                                  "use TLS (?ssl=true) or allow it explicitly with ?allow_cleartext_password=true")
+      end
+      (password + "\0").to_slice
+    end
+
+    # AuthMoreData: a caching_sha2_password status byte, or the RSA public key we asked for.
+    private def auth_more_data(plugin : String, data : Bytes, password : String, scramble : Bytes) : Nil
+      if plugin == "caching_sha2_password" && data.size == 1
+        case data[0]
+        when FAST_AUTH_SUCCESS # the OK packet follows
+        when PERFORM_FULL_AUTHENTICATION
+          write_packet(full_auth_payload(password, scramble, request_key: CACHING_SHA2_REQUEST_KEY))
+        else
+          raise ConnectionError.new("Unexpected caching_sha2_password status #{data[0]}")
+        end
+      elsif @public_key_requested
+        @public_key_requested = false
+        write_packet(RSA.encrypt_password(password, scramble, String.new(data)))
+      else
+        # Never encrypt the password with a key we did not ask for: over TLS or with a
+        # pinned key, that would hand the password to whoever sent it.
+        raise ConnectionError.new("MySQL authentication: unexpected public key or data from the server (#{plugin})")
+      end
+    end
+
+    # The password itself: in clear over TLS, RSA-encrypted with the pinned server key,
+    # or a request for the server's public key (answered with AuthMoreData).
+    private def full_auth_payload(password : String, scramble : Bytes, request_key : UInt8) : Bytes
+      if @tls
+        (password + "\0").to_slice
+      elsif key = @options.server_public_key
+        RSA.encrypt_password(password, scramble, key)
+      else
+        @public_key_requested = true
+        Bytes[request_key]
       end
     end
 
@@ -214,8 +328,15 @@ module Silth::DB::MySQL
 
     # --- queries -----------------------------------------------------------
 
+    # Runs *sql*: prepared statement when there are parameters, text protocol otherwise.
     def query(sql : String, args : Array(Value)) : ResultSet
-      @mutex.synchronize { run(interpolate(sql, args)) }
+      @mutex.synchronize do
+        if args.empty? || !prepared_statements?
+          run(interpolate(sql, args))
+        else
+          run_prepared(sql, args)
+        end
+      end
     end
 
     def exec_script(sql : String) : Nil
@@ -225,97 +346,166 @@ module Silth::DB::MySQL
     private def run(sql : String) : ResultSet
       @seq = 0_u8
       payload = IO::Memory.new
-      payload.write_byte(0x03_u8)
+      payload.write_byte(COM_QUERY)
       payload << sql
       write_packet(payload.to_slice)
+      read_results(sql, binary: false)
+    end
 
+    # --- prepared statements -------------------------------------------------
+
+    private def run_prepared(sql : String, args : Array(Value)) : ResultSet
+      execute_cached(sql, args)
+    ensure
+      trim_statement_cache unless @closed
+    end
+
+    private def execute_cached(sql : String, args : Array(Value)) : ResultSet
+      stmt = statement(sql) || return run(interpolate(sql, args))
+      execute(stmt, sql, args)
+    rescue ex : QueryError
+      # The server could not re-prepare the statement after a schema change: start over.
+      raise ex unless ex.code == ER_NEED_REPREPARE
+      discard_statement(sql)
+      stmt = statement(sql) || return run(interpolate(sql, args))
+      execute(stmt, sql, args)
+    end
+
+    # The prepared statement for *sql* (prepared on a cache miss), or nil when the
+    # server refuses to prepare it and the query must be interpolated instead.
+    private def statement(sql : String) : Statement?
+      if stmt = @statements.delete(sql)
+        return @statements[sql] = stmt # now the most recently used
+      end
+      @statements[sql] = prepare(sql)
+    rescue ex : QueryError
+      raise ex unless ex.code.in?(ER_UNSUPPORTED_PS, ER_MAX_PREPARED_STMT_COUNT_REACHED)
+      nil
+    end
+
+    private def prepare(sql : String) : Statement
+      @seq = 0_u8
+      payload = IO::Memory.new
+      payload.write_byte(COM_STMT_PREPARE)
+      payload << sql
+      write_packet(payload.to_slice)
+      packet = read_packet
+      raise build_error(packet, sql) if packet[0] == 0xFF
+      io = IO::Memory.new(packet[1..])
+      id = io.read_bytes(UInt32, LE)
+      columns = io.read_bytes(UInt16, LE).to_i
+      params = io.read_bytes(UInt16, LE).to_i
+      skip_definitions(params)
+      skip_definitions(columns)
+      Statement.new(id, params)
+    end
+
+    # Column definitions sent by COM_STMT_PREPARE (resent with every execution).
+    private def skip_definitions(count : Int32) : Nil
+      return if count == 0
+      count.times { read_packet }
+      read_packet # EOF
+    end
+
+    private def execute(stmt : Statement, sql : String, args : Array(Value)) : ResultSet
+      unless stmt.params == args.size
+        raise Error.new("SQL expects #{stmt.params} parameter(s), got #{args.size}: #{sql[0, 200]}")
+      end
+      @seq = 0_u8
+      write_packet(Codec.execute_payload(stmt.id, args))
+      read_results(sql, binary: true)
+    end
+
+    private def trim_statement_cache : Nil
+      while @statements.size > statement_cache_size
+        _sql, stmt = @statements.shift
+        close_statement(stmt)
+      end
+    end
+
+    private def discard_statement(sql : String) : Nil
+      @statements.delete(sql).try { |stmt| close_statement(stmt) }
+    end
+
+    # COM_STMT_CLOSE has no response.
+    private def close_statement(stmt : Statement) : Nil
+      @seq = 0_u8
+      payload = IO::Memory.new(5)
+      payload.write_byte(COM_STMT_CLOSE)
+      payload.write_bytes(stmt.id, LE)
+      write_packet(payload.to_slice)
+    end
+
+    # --- results -------------------------------------------------------------
+
+    # Reads OK packets and result sets until the server has no more results.
+    private def read_results(sql : String, binary : Bool) : ResultSet
       result = ResultSet.new
       loop do
         packet = read_packet
-        more = false
-        case packet[0]
-        when 0x00
-          io = IO::Memory.new(packet[1..])
-          result.rows_affected = read_lenenc_int(io).to_i64
-          last_id = read_lenenc_int(io).to_i64
-          result.last_insert_id = last_id if last_id > 0
-          status = io.read_bytes(UInt16, LE)
-          @no_backslash_escapes = status & SERVER_NO_BACKSLASH_ESC != 0
-          more = status & SERVER_MORE_RESULTS != 0
-        when 0xFF
-          drain_on_error
-          raise build_error(packet, sql)
-        else
-          count = read_lenenc_int(IO::Memory.new(packet)).to_i
-          columns = Array(Column).new(count) { parse_column(read_packet) }
-          read_packet # EOF after column definitions
-          rows = [] of Array(Value)
-          loop do
-            row = read_packet
-            if row[0] == 0xFE && row.size < 9
-              status = IO::Memory.new(row[3, 2]).read_bytes(UInt16, LE)
-              more = status & SERVER_MORE_RESULTS != 0
-              break
-            elsif row[0] == 0xFF
-              raise build_error(row, sql)
-            end
-            rows << parse_row(row, columns)
-          end
-          result = ResultSet.new(columns.map(&.name), rows) if result.columns.empty?
-        end
+        more = case packet[0]
+               when 0x00
+                 read_ok(packet, result)
+               when 0xFF
+                 raise build_error(packet, sql)
+               else
+                 columns, rows, more_results = read_result_set(packet, sql, binary)
+                 result = ResultSet.new(columns.map(&.name), rows) if result.columns.empty?
+                 more_results
+               end
         break unless more
       end
       result
     end
 
-    private def drain_on_error : Nil
+    # Applies an OK packet to *result*; returns true when more results follow.
+    private def read_ok(packet : Bytes, result : ResultSet) : Bool
+      io = IO::Memory.new(packet[1..])
+      result.rows_affected = Codec.read_lenenc_int(io).to_i64
+      last_id = Codec.read_lenenc_int(io).to_i64
+      result.last_insert_id = last_id if last_id > 0
+      server_status(io.read_bytes(UInt16, LE))
+    end
+
+    private def read_result_set(header : Bytes, sql : String, binary : Bool) : {Array(Column), Array(Array(Value)), Bool}
+      count = Codec.read_lenenc_int(IO::Memory.new(header)).to_i
+      columns = Array(Column).new(count) { parse_column(read_packet) }
+      read_packet # EOF after column definitions
+      rows = [] of Array(Value)
+      loop do
+        row = read_packet
+        if row[0] == 0xFE && row.size < 9
+          return {columns, rows, server_status(IO::Memory.new(row[3, 2]).read_bytes(UInt16, LE))}
+        elsif row[0] == 0xFF
+          raise build_error(row, sql)
+        end
+        rows << (binary ? Codec.decode_binary_row(row, columns) : Codec.decode_text_row(row, columns))
+      end
+    end
+
+    # Records server status flags; returns true when more results follow.
+    private def server_status(status : UInt16) : Bool
+      @no_backslash_escapes = status & SERVER_NO_BACKSLASH_ESC != 0
+      status & SERVER_MORE_RESULTS != 0
     end
 
     private def parse_column(packet : Bytes) : Column
       io = IO::Memory.new(packet)
-      4.times { read_lenenc_str(io) } # catalog, schema, table, org_table
-      name = read_lenenc_str(io)
-      read_lenenc_str(io) # org_name
-      read_lenenc_int(io)
+      4.times { Codec.read_lenenc_str(io) } # catalog, schema, table, org_table
+      name = Codec.read_lenenc_str(io)
+      Codec.read_lenenc_str(io) # org_name
+      Codec.read_lenenc_int(io) # length of the fixed fields
       charset = io.read_bytes(UInt16, LE)
       length = io.read_bytes(UInt32, LE)
       type = io.read_byte || 0_u8
-      Column.new(name, type, charset, length)
-    end
-
-    private def parse_row(packet : Bytes, columns : Array(Column)) : Array(Value)
-      io = IO::Memory.new(packet)
-      Array(Value).new(columns.size) do |i|
-        if io.peek.try(&.first?) == 0xFB
-          io.skip(1)
-          nil
-        else
-          raw = read_lenenc_bytes(io)
-          decode(raw, columns[i])
-        end
-      end
-    end
-
-    private def decode(raw : Bytes, col : Column) : Value
-      case col.type
-      when 0x01, 0x02, 0x03, 0x09, 0x0d then String.new(raw).to_i32
-      when 0x08                          then String.new(raw).to_i64? || String.new(raw).to_u64.to_i64!
-      when 0x04                          then String.new(raw).to_f32
-      when 0x05                          then String.new(raw).to_f64
-      when 0x00, 0xf6                    then String.new(raw).to_f64
-      when 0x07, 0x0a, 0x0c
-        text = String.new(raw)
-        text.starts_with?("0000-00-00") ? nil : DB.parse_time(text)
-      when 0xf5 then JSON.parse(String.new(raw))
-      when 0xf9, 0xfa, 0xfb, 0xfc, 0xfd, 0xfe, 0x0f
-        col.charset == 63 ? raw : String.new(raw)
-      when 0x10 then raw.reduce(0_i64) { |acc, b| (acc << 8) | b }
-      else           String.new(raw)
-      end
+      flags = io.read_bytes(UInt16, LE)
+      decimals = io.read_byte || 0_u8
+      Column.new(name, type, charset, length, flags, decimals)
     end
 
     # --- parameter interpolation ------------------------------------------
 
+    # Inlines *args* into *sql* with strict escaping (used without prepared statements).
     def interpolate(sql : String, args : Array(Value)) : String
       return sql if args.empty?
       index = 0
@@ -349,8 +539,8 @@ module Silth::DB::MySQL
 
     private def literal(io : IO, value : Value) : Nil
       case value
-      when Nil   then io << "NULL"
-      when Bool  then io << (value ? '1' : '0')
+      when Nil          then io << "NULL"
+      when Bool         then io << (value ? '1' : '0')
       when Int32, Int64 then io << value
       when Float32, Float64
         io << (value.finite? ? value.to_s : "NULL")
@@ -368,16 +558,16 @@ module Silth::DB::MySQL
       else
         value.each_char do |c|
           case c
-          when '\0'   then io << "\\0"
-          when '\''   then io << "\\'"
-          when '"'    then io << "\\\""
-          when '\b'   then io << "\\b"
-          when '\n'   then io << "\\n"
-          when '\r'   then io << "\\r"
-          when '\t'   then io << "\\t"
+          when '\0'     then io << "\\0"
+          when '\''     then io << "\\'"
+          when '"'      then io << "\\\""
+          when '\b'     then io << "\\b"
+          when '\n'     then io << "\\n"
+          when '\r'     then io << "\\r"
+          when '\t'     then io << "\\t"
           when '\u001a' then io << "\\Z"
-          when '\\'   then io << "\\\\"
-          else             io << c
+          when '\\'     then io << "\\\\"
+          else               io << c
           end
         end
       end
@@ -423,47 +613,6 @@ module Silth::DB::MySQL
       raise ex
     end
 
-    private def read_lenenc_int(io : IO) : UInt64
-      first = io.read_byte || return 0_u64
-      case first
-      when 0xFC then io.read_bytes(UInt16, LE).to_u64
-      when 0xFD
-        b = Bytes.new(3)
-        io.read_fully(b)
-        (b[0].to_u64 | (b[1].to_u64 << 8) | (b[2].to_u64 << 16))
-      when 0xFE then io.read_bytes(UInt64, LE)
-      else           first.to_u64
-      end
-    end
-
-    private def read_lenenc_bytes(io : IO) : Bytes
-      len = read_lenenc_int(io)
-      bytes = Bytes.new(len)
-      io.read_fully(bytes)
-      bytes
-    end
-
-    private def read_lenenc_str(io : IO) : String
-      String.new(read_lenenc_bytes(io))
-    end
-
-    private def write_lenenc_int(io : IO, value : UInt64) : Nil
-      if value < 251
-        io.write_byte(value.to_u8)
-      elsif value < 65536
-        io.write_byte(0xFC_u8)
-        io.write_bytes(value.to_u16, LE)
-      elsif value < 16_777_216
-        io.write_byte(0xFD_u8)
-        io.write_byte((value & 0xFF).to_u8)
-        io.write_byte(((value >> 8) & 0xFF).to_u8)
-        io.write_byte(((value >> 16) & 0xFF).to_u8)
-      else
-        io.write_byte(0xFE_u8)
-        io.write_bytes(value, LE)
-      end
-    end
-
     private def parse_err(packet : Bytes) : String
       return "unknown error" if packet.size < 3
       io = IO::Memory.new(packet[1..])
@@ -484,11 +633,11 @@ module Silth::DB::MySQL
       end
       text = "#{rest} [#{code}/#{state}] (SQL: #{sql[0, 500]})"
       case code
-      when 1062, 1586        then UniqueViolation.new(text, code.to_s, sql)
+      when 1062, 1586             then UniqueViolation.new(text, code.to_s, sql)
       when 1451, 1452, 1216, 1217 then ForeignKeyViolation.new(text, code.to_s, sql)
-      when 1048, 1364        then NotNullViolation.new(text, code.to_s, sql)
-      when 1213, 1205        then SerializationFailure.new(text, code.to_s, sql)
-      else                        QueryError.new(text, code.to_s, sql)
+      when 1048, 1364             then NotNullViolation.new(text, code.to_s, sql)
+      when 1213, 1205             then SerializationFailure.new(text, code.to_s, sql)
+      else                             QueryError.new(text, code.to_s, sql)
       end
     end
   end

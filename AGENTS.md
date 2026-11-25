@@ -6,7 +6,7 @@ Silth is a Crystal web framework with **zero third-party shards**. This reposito
 
 ```bash
 cd framework && crystal spec                     # framework specs (SQLite)
-docker compose up -d                             # PostgreSQL/pgvector :55432, MariaDB :53306, Redis, Mailpit, MinIO, Jaeger
+docker compose up -d                             # PostgreSQL/pgvector :55432, MariaDB :53306, MySQL 8.4 :53307, Redis, Mailpit, MinIO, Jaeger
 cd framework && shards build silth               # global CLI → framework/bin/silth
 cd website && ../framework/bin/silth serve       # website + docs with live reload
 bin/sync-skills                                  # copy skills/silth into the app template

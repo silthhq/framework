@@ -1,0 +1,1 @@
+<% component PanelComponent do |panel| %><% panel.slot :header do %><h1><%= title %></h1><% end %><p>Body</p><% if with_footer %><% panel.slot :footer do %><small>Footer</small><% end %><% end %><% end %>

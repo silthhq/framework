@@ -3,7 +3,7 @@ module Silth
   #
   # ```yaml
   # # config/cache.yml
-  # default: memory          # memory | file | database | redis | null
+  # default: memory          # memory | file | database | postgres | redis | null
   # stores:
   #   file: { path: tmp/cache }
   #   redis: { url: ${REDIS_URL:-redis://localhost:6379/1} }
@@ -347,6 +347,7 @@ module Silth
     when "memory"   then MemoryCache.new(name)
     when "file"     then FileCache.new(name, config.string("cache.stores.#{name}.path", "tmp/cache"))
     when "database" then DatabaseCache.new(name, config.string?("cache.stores.#{name}.connection"))
+    when "postgres" then PostgresCache.new(name, config.string?("cache.stores.#{name}.connection"), config.string("cache.stores.#{name}.table", PostgresCache::DEFAULT_TABLE))
     when "redis"    then RedisCache.new(name, config.string("cache.stores.#{name}.url", ENV["REDIS_URL"]? || "redis://localhost:6379/1"), config.string("cache.prefix", "silth:"))
     when "null"     then NullCache.new(name)
     else                 raise ConfigError.new("Unknown cache driver '#{driver}'")

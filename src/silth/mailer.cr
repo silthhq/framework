@@ -20,6 +20,16 @@ module Silth
   # WelcomeMail.new(user).deliver        # now
   # WelcomeMail.new(user).deliver_later  # in a fiber / the queue
   # ```
+  #
+  # Markdown mails get a themed HTML layout and a text version for free:
+  #
+  # ```
+  # def build : Nil
+  #   to @user.email
+  #   subject "Confirm your address"
+  #   markdown "mails/confirm", user: @user, url: confirm_url   # src/views/mails/confirm.md.ecr
+  # end
+  # ```
   abstract class Mail
     include View::Rendering
     include View::Helpers
@@ -80,6 +90,29 @@ module Silth
 
     def text(body : String) : Nil
       @text_body = body
+    end
+
+    # Renders `src/views/<template>.md.ecr` as a Markdown mail: themed HTML body,
+    # text body, `button`/`panel` helpers. Values from `<%= %>` are shown as is.
+    macro markdown(template, **locals)
+      {% path = template.ends_with?(".ecr") ? template : "src/views/" + template + ".md.ecr" %}
+      begin
+        {% for key, value in locals %}
+          %local{key} = {{value}}
+        {% end %}
+        {% for key, value in locals %}
+          {{key.id}} = %local{key}
+        {% end %}
+        %previous = @view_io
+        %buffer = ::Silth::Mail::MarkdownBuffer.new
+        begin
+          @view_io = %buffer
+          {{ run("./view/ecr_process", path, "@view_io") }}
+        ensure
+          @view_io = %previous
+        end
+        markdown_body(%buffer.to_s)
+      end
     end
 
     def header(name : String, value : String) : Nil

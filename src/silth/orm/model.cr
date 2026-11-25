@@ -14,6 +14,13 @@ module Silth
       end
     end
 
+    # Raised when an optimistically locked record changed in the database since it was read.
+    class StaleObjectError < Silth::Error
+      def initialize(model : String, id : DB::Value, version : Int64)
+        super("#{model} #{id} was changed by someone else (#{model}##{id} is no longer at lock_version #{version}): reload it and try again")
+      end
+    end
+
     class MissingAttribute < Silth::Error
       def initialize(model : String, attribute : String)
         super("#{model}##{attribute} is nil (not loaded or not set). Use `#{attribute}?` for a nilable read.")
@@ -223,6 +230,29 @@ module Silth
       end
     end
 
+    # Optimistic locking: every update or destroy checks that `lock_version` (an
+    # integer column, `t.lock_version` in migrations) still holds the value read with
+    # the record, and increments it. A concurrent change raises `ORM::StaleObjectError`.
+    #
+    # ```
+    # class Order < Silth::Model
+    #   primary_key
+    #   column total : Float64
+    #   optimistic_locking
+    # end
+    # ```
+    macro optimistic_locking(column = lock_version)
+      column {{column.id}} : Int32 = 0
+
+      def self.locking_column : String?
+        {{column.id.stringify}}
+      end
+    end
+
+    def self.locking_column : String?
+      nil
+    end
+
     # Reusable query: `scope published { where(published: true) }`, also chainable on queries.
     macro scope(name, &block)
       {% blk = block.is_a?(Nop) ? name.block : block %}
@@ -241,7 +271,24 @@ module Silth
     # --- associations ----------------------------------------------------------
 
     # `belongs_to user : User` declares `user_id : Int64` and a lazy `user` reader.
-    macro belongs_to(decl, foreign_key = nil, optional = false, primary_key = "id")
+    #
+    # ```
+    # belongs_to post : Post, counter_cache: true             # keeps posts.comments_count up to date
+    # belongs_to commentable, polymorphic: true               # commentable_type + commentable_id, returns Silth::Model?
+    # belongs_to commentable : Post | Video, polymorphic: true # only these classes (still Silth::Model?)
+    # belongs_to imageable : User, polymorphic: true           # one class: the reader returns User?
+    # ```
+    macro belongs_to(decl, foreign_key = nil, optional = false, primary_key = "id", polymorphic = false, counter_cache = nil)
+      {% if polymorphic %}
+        {% raise "counter_cache is not supported on polymorphic belongs_to" if counter_cache %}
+        __polymorphic_belongs_to({{decl}}, {{optional}})
+      {% else %}
+        __belongs_to({{decl}}, {{foreign_key}}, {{optional}}, {{primary_key}}, {{counter_cache}})
+      {% end %}
+    end
+
+    # :nodoc:
+    macro __belongs_to(decl, foreign_key, optional, primary_key, counter_cache)
       {% name = decl.var %}
       {% klass = decl.type %}
       {% fk = (foreign_key || "#{name}_id").id %}
@@ -280,15 +327,122 @@ module Silth
         index = found.index_by(&.{{primary_key.id}})
         records.each { |r| r.__set_{{name}}(r.{{fk}}?.try { |k| index[k]? }) }
       end
+
+      {% if counter_cache %}
+        # :nodoc: keeps the parent's counter in sync. A row counts while it has a
+        # parent and is not soft deleted: compare before and after the change.
+        def __counter_cache_{{name}}(event : Symbol, changed : Hash(String, {::Silth::DB::Value, ::Silth::DB::Value})) : Nil
+          trashed = !read_attribute("deleted_at").nil?
+          key = ::Silth::DB.as_i64?(read_attribute({{fk.stringify}}))
+          old_key = (c = changed[{{fk.stringify}}]?) ? ::Silth::DB.as_i64?(c[0]) : key
+          old_trashed = (d = changed["deleted_at"]?) ? !d[0].nil? : trashed
+          before = event == :create || old_trashed ? nil : old_key
+          after = event == :delete || trashed ? nil : key
+          return if before == after
+          counter = {% if counter_cache == true %}"#{self.class.table_name}_count"{% else %}{{counter_cache.id.stringify}}{% end %}
+          before.try { |k| ::Silth::DB::QueryBuilder.new({{klass}}.table_name, {{klass}}.database).where({{primary_key.id}}: k).increment(counter, -1) }
+          after.try { |k| ::Silth::DB::QueryBuilder.new({{klass}}.table_name, {{klass}}.database).where({{primary_key.id}}: k).increment(counter, 1) }
+        end
+      {% end %}
+    end
+
+    # :nodoc:
+    macro __polymorphic_belongs_to(decl, optional)
+      {% if decl.is_a?(TypeDeclaration) %}
+        {% name = decl.var %}
+        {% types = decl.type.is_a?(Union) ? decl.type.types : [decl.type] %}
+        {% target = (types.size == 1 ? types[0] : "::Silth::Model").id %}
+      {% else %}
+        {% name = decl.id %}
+        {% types = nil %}
+        {% target = "::Silth::Model".id %}
+      {% end %}
+      column {{name}}_type : String{% if optional %}?{% end %}
+      column {{name}}_id : Int64{% if optional %}?{% end %}
+      @__rel_{{name}} : ({{target}})? = nil
+      @__rel_{{name}}_loaded = false
+
+      def {{name}} : ({{target}})?
+        return @__rel_{{name}} if @__rel_{{name}}_loaded
+        @__rel_{{name}}_loaded = true
+        @__rel_{{name}} = self.class.__polymorphic_{{name}}(@{{name}}_type, @{{name}}_id.try { |i| [i] } || [] of Int64).values.first?
+      end
+
+      def {{name}}! : {{target}}
+        {{name}} || raise ::Silth::ORM::RecordNotFound.new(@{{name}}_type.to_s, "id=#{@{{name}}_id}")
+      end
+
+      def {{name}}=(record : ({{target}})?) : Nil
+        {% if types && types.size > 1 %}
+          if record && !({{types.map { |t| "record.is_a?(#{t})" }.join(" || ").id}})
+            raise ArgumentError.new("#{record.class.name} is not a valid {{name}} for #{self.class.name} (expected {{types.join(" | ").id}})")
+          end
+        {% end %}
+        @__rel_{{name}} = record
+        @__rel_{{name}}_loaded = true
+        self.{{name}}_type = record.try(&.class.name)
+        self.{{name}}_id = record.try { |r| ::Silth::DB.as_i64?(r.read_attribute(r.__primary_key_name)) }
+      end
+
+      # :nodoc:
+      def __set_{{name}}(record : ({{target}})?) : Nil
+        @__rel_{{name}} = record
+        @__rel_{{name}}_loaded = true
+      end
+
+      # :nodoc: records of class *type* by primary key.
+      def self.__polymorphic_{{name}}(type : String?, ids : Array(Int64)) : Hash(Int64, {{target}})
+        found = {} of Int64 => {{target}}
+        return found if type.nil? || ids.empty?
+        {% if types %}
+          case type
+          {% for t in types %}
+            when {{t}}.name
+              {{t}}.where_in({{t}}.primary_key_name, ids).to_a.each { |r| found[::Silth::DB.as_i64(r.read_attribute(r.__primary_key_name))] = r }
+          {% end %}
+          else
+            raise ::Silth::Error.new("#{type} is not a valid {{name}} for #{self.name} (expected {{types.join(" | ").id}})")
+          end
+        {% else %}
+          ::Silth::Model.__find_polymorphic(type, ids).each { |k, r| found[k] = r }
+        {% end %}
+        found
+      end
+
+      # :nodoc:
+      def self.__preload_{{name}}(records : Array({{@type}})) : Nil
+        records.group_by(&.{{name}}_type?).each do |type, group|
+          found = __polymorphic_{{name}}(type, group.compact_map(&.{{name}}_id?).uniq)
+          group.each { |r| r.__set_{{name}}(r.{{name}}_id?.try { |k| found[k]? }) }
+        end
+      end
+    end
+
+    # :nodoc: records of the model named *type* (any model), by primary key.
+    def self.__find_polymorphic(type : String, ids : Array(Int64)) : Hash(Int64, Silth::Model)
+      found = {} of Int64 => Silth::Model
+      {% begin %}
+        case type
+        {% for t in @type.all_subclasses.reject(&.abstract?) %}
+          when {{t}}.name
+            {{t}}.where_in({{t}}.primary_key_name, ids).to_a.each { |r| found[DB.as_i64(r.read_attribute(r.__primary_key_name))] = r }
+        {% end %}
+        else
+          raise Silth::Error.new("Unknown model #{type} in a polymorphic relation")
+        end
+      {% end %}
+      found
     end
 
     # `has_many comments : Comment` → `post.comments` returns a chainable query.
     # `has_many tags : Tag, through: "post_tags"` for many-to-many pivot tables.
-    macro has_many(decl, foreign_key = nil, through = nil, related_key = nil, dependent = nil)
+    # `has_many comments : Comment, as: commentable` for a polymorphic `belongs_to`.
+    macro has_many(decl, foreign_key = nil, through = nil, related_key = nil, dependent = nil, as poly = nil)
       {% name = decl.var %}
       {% klass = decl.type %}
       {% owner = @type.name.split("::").last.underscore %}
-      {% fk = (foreign_key || "#{owner.id}_id").id %}
+      {% fk = (foreign_key || (poly ? "#{poly.id}_id" : "#{owner.id}_id")).id %}
+      {% morph = poly ? "#{poly.id}_type".id : nil %}
       @__many_{{name}} : Array({{klass}})? = nil
 
       {% if through %}
@@ -338,6 +492,9 @@ module Silth
       {% else %}
         def {{name}} : ::Silth::ORM::Query({{klass}})
           q = {{klass}}.query.where({{fk}}: id).__with_defaults({ {{fk.stringify}} => id.as(::Silth::DB::Value) })
+          {% if morph %}
+            q = q.where({{morph}}: self.class.name).__with_defaults({ {{morph.stringify}} => self.class.name.as(::Silth::DB::Value) })
+          {% end %}
           (cached = @__many_{{name}}) ? q.__preloaded(cached) : q
         end
 
@@ -345,7 +502,7 @@ module Silth
         def self.__preload_{{name}}(records : Array({{@type}})) : Nil
           ids = records.compact_map(&.id?)
           return if ids.empty?
-          children = {{klass}}.where_in({{fk.stringify}}, ids).to_a
+          children = {{klass}}.where_in({{fk.stringify}}, ids){% if morph %}.where({{morph}}: self.name){% end %}.to_a
           grouped = children.group_by(&.{{fk}}?)
           records.each { |r| r.__set_{{name}}(grouped[r.id]? || [] of {{klass}}) }
         end
@@ -358,7 +515,7 @@ module Silth
             {% elsif dependent == :delete %}
               {{name}}.delete_all
             {% elsif dependent == :nullify %}
-              {{name}}.update_all({{fk}}: nil)
+              {{name}}.update_all({{fk}}: nil{% if poly %}, {{poly.id}}_type: nil{% end %})
             {% end %}
           end
         {% end %}
@@ -370,19 +527,20 @@ module Silth
       end
     end
 
-    # `has_one profile : Profile`.
-    macro has_one(decl, foreign_key = nil, dependent = nil)
+    # `has_one profile : Profile`, or `has_one image : Image, as: imageable` (polymorphic).
+    macro has_one(decl, foreign_key = nil, dependent = nil, as poly = nil)
       {% name = decl.var %}
       {% klass = decl.type %}
       {% owner = @type.name.split("::").last.underscore %}
-      {% fk = (foreign_key || "#{owner.id}_id").id %}
+      {% fk = (foreign_key || (poly ? "#{poly.id}_id" : "#{owner.id}_id")).id %}
+      {% morph = poly ? "#{poly.id}_type".id : nil %}
       @__one_{{name}} : {{klass}}? = nil
       @__one_{{name}}_loaded = false
 
       def {{name}} : {{klass}}?
         return @__one_{{name}} if @__one_{{name}}_loaded
         @__one_{{name}}_loaded = true
-        @__one_{{name}} = {{klass}}.find_by?({{fk}}: id)
+        @__one_{{name}} = {{klass}}.query.where({{fk}}: id){% if morph %}.where({{morph}}: self.class.name){% end %}.first?
       end
 
       # :nodoc:
@@ -395,7 +553,7 @@ module Silth
       def self.__preload_{{name}}(records : Array({{@type}})) : Nil
         ids = records.compact_map(&.id?)
         return if ids.empty?
-        index = {{klass}}.where_in({{fk.stringify}}, ids).to_a.index_by(&.{{fk}}?)
+        index = {{klass}}.where_in({{fk.stringify}}, ids){% if morph %}.where({{morph}}: self.name){% end %}.to_a.index_by(&.{{fk}}?)
         records.each { |r| r.__set_{{name}}(index[r.id]?) }
       end
 
@@ -848,6 +1006,7 @@ module Silth
         end
       end
       __mark_persisted
+      __counter_caches(:create)
     end
 
     # :nodoc:
@@ -864,15 +1023,52 @@ module Silth
       return if changed.empty?
       values = {} of String => DB::Value
       changed.each { |k, v| values[k] = v[1] }
-      pk = __primary_key_name
-      DB::QueryBuilder.new(self.class.table_name, self.class.database).where({pk => read_attribute(pk)}).update(values)
+      if lock = self.class.locking_column
+        version = __locked_version(changed)
+        values[lock] = version + 1
+        rows = __row_query(lock, version).update(values)
+        raise ORM::StaleObjectError.new(self.class.name, read_attribute(__primary_key_name), version) if rows == 0
+        write_attribute(lock, version + 1)
+      else
+        __row_query.update(values)
+      end
+      __counter_caches(:update, changed)
       @__changes = nil
     end
 
     # :nodoc:
     def __delete_row : Nil
+      if lock = self.class.locking_column
+        version = __locked_version(changes)
+        if __row_query(lock, version).delete == 0
+          raise ORM::StaleObjectError.new(self.class.name, read_attribute(__primary_key_name), version)
+        end
+      else
+        __row_query.delete
+      end
+      __counter_caches(:delete)
+    end
+
+    # The row of this record (and of its expected lock version).
+    private def __row_query(lock : String? = nil, version : Int64? = nil) : DB::QueryBuilder
       pk = __primary_key_name
-      DB::QueryBuilder.new(self.class.table_name, self.class.database).where({pk => read_attribute(pk)}).delete
+      query = DB::QueryBuilder.new(self.class.table_name, self.class.database).where({pk => read_attribute(pk)})
+      lock ? query.where({lock => version.as(DB::Value)}) : query
+    end
+
+    # The lock version read from the database (before any local change to it).
+    private def __locked_version(changed : Hash(String, {DB::Value, DB::Value})) : Int64
+      lock = self.class.locking_column.not_nil!
+      DB.as_i64((c = changed[lock]?) ? c[0] : read_attribute(lock))
+    end
+
+    # :nodoc: runs the `counter_cache:` handlers of this model's `belongs_to`.
+    def __counter_caches(event : Symbol, changed : Hash(String, {DB::Value, DB::Value}) = {} of String => {DB::Value, DB::Value}) : Nil
+      {% begin %}
+        {% for m in @type.methods.select { |m| m.name.starts_with?("__counter_cache_") } %}
+          {{m.name.id}}(event, changed)
+        {% end %}
+      {% end %}
     end
 
     # --- serialization -------------------------------------------------------------------

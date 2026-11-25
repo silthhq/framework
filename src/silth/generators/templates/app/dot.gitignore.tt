@@ -12,3 +12,4 @@
 .env.local
 *.dwarf
 .DS_Store
+.env.production

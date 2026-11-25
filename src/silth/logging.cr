@@ -140,6 +140,11 @@ module Silth
         file = File.new(path, "a")
         broadcast.append(::Log::IOBackend.new(file, formatter: JSONFormatter.new, dispatcher: :sync), level)
       end
+      if config.keys("logging").includes?("postgres")
+        pg_level = ::Log::Severity.parse?(config.string("logging.postgres.level", "info")) || ::Log::Severity::Info
+        retention = config.int("logging.postgres.retention_days", 14).days
+        broadcast.append(PostgresBackend.new(config.string?("logging.postgres.connection"), retention), pg_level)
+      end
       broadcast.append(HookBackend.new, ::Log::Severity::Trace)
       ::Log.setup do |c|
         c.bind "*", ::Log::Severity::Trace, broadcast

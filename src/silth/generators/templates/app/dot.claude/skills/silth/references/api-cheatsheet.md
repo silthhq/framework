@@ -15,16 +15,20 @@ CRUD: `create!`, `save`, `save!`, `update`, `destroy`, `find`, `find?`, `find_by
 Query: `where`, `or_where`, `where_not`, `where_in`, `where_null`, `where_between`, `where_like`, `where_group { |g| … }`, `join`, `order(created_at: :desc)`, `latest`, `limit`, `offset`, `group_by`, `having`, `select`, `distinct`, `includes(:rel)`, `with_trashed`, `lock_for_update(skip_locked: true)`.
 Fetch: `to_a`, `first`, `first?`, `last`, `count`, `exists?`, `pluck`, `sum/avg/min/max`, `paginate(page, per)`, `cursor_paginate`, `find_each`.
 PostgreSQL: `search([:title, :body], q)`, `order_by_relevance`, `nearest(:embedding, vec, metric: :cosine)`, `select_distance`, `where_json`, `where_json_contains`.
-Relations: `belongs_to x : X, optional: true`, `has_many xs : X, through: "pivot", dependent: :destroy`, `has_one`. Many-to-many: `attach_tags`, `detach_tags`, `sync_tags`.
+Relations: `belongs_to x : X, optional: true, counter_cache: true` (X.<table>_count), polymorphic `belongs_to commentable : Post | Video, polymorphic: true` + `has_many comments : Comment, as: commentable` (reader returns `Silth::Model?`), `has_many xs : X, through: "pivot", dependent: :destroy`, `has_one`. Many-to-many: `attach_tags`, `detach_tags`, `sync_tags`.
+Locking: `optimistic_locking` + `t.lock_version` → `Silth::ORM::StaleObjectError` on concurrent update/destroy.
 Validations: presence, length, format, email, url, inclusion, exclusion, numericality, uniqueness (`{scope: [...]}`), confirmation, acceptance, `if:`. Custom: `def validate; errors.add("f", "msg"); end`.
 Raw: `Silth::DB.query(sql, args).to_hashes`, `Silth::DB.table("x")…`, `Silth::DB.transaction { }`.
+Migrations: `def change` (create_table, add_column, rename_column, add_index, add_foreign_key, enable_extension… are reversed automatically; `remove_column :t, :c, :string` and `drop_table :t do |t| … end` too), `reversible { |dir| dir.up { execute "…" }; dir.down { … } }`, or `up`/`down`. `db/schema.cr` (`Silth::DB::SchemaDefinition.define(version: …) do |s| … end`) is rewritten after migrations in development; `silth db:schema:load` rebuilds the database from it.
+PostgreSQL UNLOGGED drivers: cache `default: postgres` (config/cache.yml), sessions `driver: postgres` (config/session.yml), logs `postgres: {connection: primary, level: warn, retention_days: 14}` (config/logging.yml); `create_table :x, unlogged: true`.
+MySQL URL options: `?ssl=true`, `?statement_cache_size=256` (prepared statements per connection, `0` = close after use), `?prepared_statements=false` (client-side interpolation), `?server_public_key=path.pem` (pin the RSA key for `caching_sha2_password` without TLS), `?allow_cleartext_password=true` (LDAP/PAM over plain TCP, refused by default).
 
 ## Views
 Helpers: `link_to`, `button_to(text, url, method: "delete", confirm:)`, `route(name, **params)`, `form_with`, `f.text_field/text_area/select/check_box/errors_for/submit`, `t`, `l`, `paginate`, `flash_messages`, `partial "dir/_x", local: v`, `content_for`, `yield_content`, `component`, `live`, `stylesheet_tag`, `importmap_tags`, `silth_scripts`, `csrf_meta_tags`.
 
 ## Components
-`class X < Silth::Component; prop title : String; template "components/x"; end` → `<%= component X, title: "…" %>`, slot via `<%= yield_slot %>`.
-Live: `class Y < Silth::LiveComponent; prop q : String = "", writable: true; action def go; …; end; end`. Directives: `silth-click`, `silth-args`, `silth-submit`, `silth-model(.debounce.300ms|.lazy)`, `silth-change`, `silth-keydown.enter`, `silth-poll`, `silth-confirm`, `data-key`. Server push: `def subscriptions; ["topic"]; end` + `Silth::Live.refresh("topic")`. Browser events: `emit("name", payload)` → `window` event `silth:name`.
+`class X < Silth::Component; prop title : String; template "components/x"; end` → `<%= component X, title: "…" %>`, slot via `<%= yield_slot %>`; named slots: `<% component X do |x| %><% x.slot :footer do %>…<% end %>…<% end %>` + `<%= yield_slot :footer %>`, `slot?(:footer)`.
+Live: `class Y < Silth::LiveComponent; prop q : String = "", writable: true; action def go; …; end; end`. Directives: `silth-click`, `silth-args`, `silth-submit`, `silth-model(.debounce.300ms|.lazy)`, `silth-change`, `silth-keydown.enter`, `silth-poll`, `silth-confirm`, `data-key`. Server push: `def subscriptions; ["topic"]; end` + `Silth::Live.refresh("topic")` (several nodes: `pubsub: redis|postgres` in config/realtime.yml). Browser events: `emit("name", payload)` → `window` event `silth:name`. Uploads: `prop avatar : Silth::Live::Upload?, writable: true` + `<input type="file" silth-model="avatar">` → `avatar.preview_url`, `avatar.store("avatars")`. Nested: `<%= live Child, key: item.id, … %>` in a live template, child calls `notify_parent("action", *args)`.
 
 ## Auth & authorization
 `include Silth::Auth::Authenticatable` (needs `password_digest`). `auth.attempt(email, pw, remember:)`, `auth.login(user)`, `auth.logout`, `user.create_token("cli", ["posts:read"])`, `Silth::JWT.encode/decode`, `Silth::Auth::TOTP`, `Silth::Auth.password_reset_token(user)`. Middleware aliases: `:auth`, `:guest`, `:verified`, `:signed`, `:throttle`.
@@ -33,9 +37,9 @@ Policies: `class PostPolicy < Silth::Policy; def update?(user : User, post : Pos
 ## Services
 Cache: `Silth.cache.fetch(key, 10.minutes) { … }`, `lock`, `increment`.
 Events: `Silth::Events.listen(E) { |e| }`, `dispatch`, `Listener(E)` classes (`queued`).
-Jobs: `class J < Silth::Job; queue "q"; retries 3; def perform : Nil; end; end`, `J.new(…).dispatch(delay: 5.minutes)`, `silth queue:work`.
+Jobs: `class J < Silth::Job; queue "q"; retries 3; def perform : Nil; end; end`, `J.new(…).dispatch(delay: 5.minutes)` (→ `String?`), `silth queue:work`. `unique for: 10.minutes` (duplicates skipped, `unique_key`), `rate_limit 30, per: 1.minute`, queue limits `rate_limits: {mail: 10/1s}` in config/queue.yml. Batches: `Silth::Batch.dispatch(jobs, on_success: J.new, on_failure: J.new, on_complete: J.new, allow_failures: false)`, `batch.progress`, `batch.cancel`, `batch` inside jobs.
 Schedule: `Silth.schedule { |s| s.job(J.new).daily_at("03:00") }`.
-Mail: `class M < Silth::Mail; def build : Nil; to …; subject …; html render_to_string("mails/x", layout: "layouts/mail", …); end; end`, `.deliver` / `.deliver_later`.
+Mail: `class M < Silth::Mail; def build : Nil; to …; subject …; html render_to_string("mails/x", layout: "layouts/mail", …); end; end`, `.deliver` / `.deliver_later`. Markdown: `markdown "mails/x", user: u` (src/views/mails/x.md.ecr, `<%= button "Label", url %>`, `<%= panel "…" %>`, text body generated). Previews: `class MPreview < Silth::MailPreview; def x : Silth::Mail; M.new(…); end; end` → /_silth/profiler/mails.
 Notifications: `class N < Silth::Notification; def via(n) : Array(Symbol); [:mail, :database]; end; end`, `user.notify(N.new)`.
 Storage: `Silth.storage.put/get?/read/url/temporary_url/put_file`, disks local|s3|memory.
 HTTP: `Silth::HTTPClient.new.bearer(t).retry(3).get(url).json`.
@@ -47,4 +51,4 @@ Telemetry: `Silth::Telemetry.trace("name") { |span| }`, `counter`, `histogram`.
 I18n: `config/locales/<locale>.yml`, `t("key", count: n, name: x)`, `l(time, "long")`.
 
 ## CLI
-`silth new|serve|build|test|g|routes|db:migrate|db:rollback|db:status|db:seed|db:fresh|queue:work|schedule:run|assets:build|api:docs|workflow:dump|export|key:generate|about|down|up`. Custom: `class X < Silth::Command; command "x:y", "desc"; argument a : String; option o : Bool = false; def run : Nil; end; end`.
+`silth new|serve|build|test|g|routes|db:migrate|db:rollback|db:status|db:seed|db:fresh|db:schema:dump|db:schema:load|queue:work|schedule:run|assets:build|api:docs|workflow:dump|export|key:generate|about|down|up|deploy:init|deploy|deploy:status|deploy:rollback`. Deploy: config/deploy.yml (`image`, `servers`, `domain`, `env_file`, `registry`, `workers`, `scheduler`, `volumes`), zero-downtime rollout over SSH + Docker + Caddy, `silth deploy --dry-run`. Custom: `class X < Silth::Command; command "x:y", "desc"; argument a : String; option o : Bool = false; def run : Nil; end; end`.

@@ -25,6 +25,15 @@ module Silth
       if s = @socket
         return s
       end
+      io = open_socket
+      @socket = io
+      db = URI.parse(@url).path.lchop('/')
+      raw(io, ["SELECT", db]) unless db.empty? || db == "0"
+      io
+    end
+
+    # A new authenticated connection (TLS with `rediss://`).
+    private def open_socket : IO
       uri = URI.parse(@url)
       tcp = TCPSocket.new(uri.host || "localhost", uri.port || 6379, connect_timeout: 5.seconds)
       tcp.tcp_nodelay = true
@@ -33,13 +42,10 @@ module Silth
            else
              tcp
            end
-      @socket = io
       if pass = uri.password
         user = uri.user.presence
         user ? raw(io, ["AUTH", user, pass]) : raw(io, ["AUTH", pass])
       end
-      db = uri.path.lchop('/')
-      raw(io, ["SELECT", db]) unless db.empty? || db == "0"
       io
     end
 
@@ -140,18 +146,24 @@ module Silth
       false
     end
 
-    # Blocking subscription on a dedicated connection.
-    def subscribe(*channels : String, & : String, String ->) : Nil
-      uri = URI.parse(@url)
-      io = TCPSocket.new(uri.host || "localhost", uri.port || 6379)
-      raw(io, ["AUTH", uri.password.not_nil!]) if uri.password
+    # Blocking subscription on this client's connection (use a dedicated client).
+    # `ready` runs once the server confirmed the subscription; `close` from another
+    # fiber ends it (with an `IO::Error`).
+    def subscribe(*channels : String, ready : (-> Nil)? = nil, & : String, String ->) : Nil
+      io = open_socket
+      @socket = io
       io << '*' << (channels.size + 1) << "\r\n$9\r\nSUBSCRIBE\r\n"
       channels.each { |c| io << '$' << c.bytesize << "\r\n" << c << "\r\n" }
       io.flush
+      confirmed = 0
       loop do
         reply = read_reply(io).as?(Array(Reply)) || next
-        if reply[0]? == "message"
+        case reply[0]?
+        when "message"
           yield reply[1].to_s, reply[2].to_s
+        when "subscribe"
+          confirmed += 1
+          ready.try &.call if confirmed == channels.size
         end
       end
     end

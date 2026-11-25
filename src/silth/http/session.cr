@@ -50,7 +50,12 @@ module Silth
     end
 
     # Changes the session identifier while keeping data (prevents fixation).
+    # The identifier before the first `regenerate`/`invalidate` of this request
+    # (server-side stores delete it, so an old cookie stops working).
+    getter previous_id : String? = nil
+
     def regenerate : Nil
+      @previous_id ||= @id
       @id = Crypto.token(24)
       @changed = true
       @regenerated = true
@@ -187,6 +192,7 @@ module Silth
     end
 
     def save(ctx : Context, session : Session) : Nil
+      session.previous_id.try { |old| Silth.cache.delete("session:#{old}") }
       Silth.cache.delete("session:#{session.id}") if session.destroyed?
       Silth.cache.set("session:#{session.id}", session.data.to_json, @ttl)
       ctx.response.cookies << @options.build(@cookie_name, @verifier.generate(session.id))
