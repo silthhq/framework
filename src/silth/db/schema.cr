@@ -38,22 +38,36 @@ module Silth::DB
 
   record IndexDef, columns : Array(String), unique : Bool, name : String, using : String?, where : String?, opclass : String?
 
-  record ForeignKeyDef, column : String, table : String, ref_column : String, on_delete : String?, on_update : String?
+  record ForeignKeyDef, column : String, table : String, ref_column : String, on_delete : String?, on_update : String?, name : String? = nil do
+    def to_sql(dialect : Dialect) : String
+      String.build do |io|
+        io << "CONSTRAINT " << dialect.quote(name.not_nil!) << ' ' if name
+        io << "FOREIGN KEY (" << dialect.quote(column) << ") REFERENCES " << dialect.quote_table(table)
+        io << " (" << dialect.quote(ref_column) << ')'
+        io << " ON DELETE " << on_delete if on_delete
+        io << " ON UPDATE " << on_update if on_update
+      end
+    end
+  end
+
+  # A default value written as SQL, used as is (`default: Silth::DB::Raw.new("(now() + interval '1 day')")`).
+  record Raw, sql : String
 
   # Converts a Crystal default into a SQL literal.
   module Literal
     def self.to_sql(value, dialect : Dialect) : String
       case value
       when Nil    then "NULL"
+      when Raw    then value.sql
       when Bool   then dialect.bool(value)
       when Number then value.to_s
       when Symbol
         case value
-        when :now          then dialect.default_timestamp
-        when :uuid         then dialect.name == "postgres" ? "gen_random_uuid()" : "NULL"
-        when :empty_json   then dialect.name == "postgres" ? "'{}'::jsonb" : "('{}')"
-        when :empty_array  then dialect.name == "postgres" ? "'[]'::jsonb" : "('[]')"
-        else                    value.to_s
+        when :now         then dialect.default_timestamp
+        when :uuid        then dialect.name == "postgres" ? "gen_random_uuid()" : "NULL"
+        when :empty_json  then dialect.name == "postgres" ? "'{}'::jsonb" : "('{}')"
+        when :empty_array then dialect.name == "postgres" ? "'[]'::jsonb" : "('[]')"
+        else                   value.to_s
         end
       else "'#{value.to_s.gsub("'", "''")}'"
       end
@@ -83,14 +97,17 @@ module Silth::DB
     getter indexes = [] of IndexDef
     getter foreign_keys = [] of ForeignKeyDef
     getter dialect : Dialect
+    # Composite primary key (`t.primary_key [:post_id, :tag_id]`).
+    getter primary_key_columns : Array(String)? = nil
 
     def initialize(@name : String, @dialect : Dialect)
     end
 
     def column(name : String | Symbol, type : Symbol, null : Bool = true, default = nil, limit : Int32? = nil,
                precision : Int32? = nil, scale : Int32? = nil, unique : Bool = false, index : Bool = false,
-               dimensions : Int32? = nil, comment : String? = nil) : ColumnDef
+               dimensions : Int32? = nil, comment : String? = nil, generated : String? = nil) : ColumnDef
       col = ColumnDef.new(name.to_s, type)
+      col.generated = generated
       col.null = null
       col.default = default.nil? ? nil : Literal.to_sql(default, @dialect)
       col.limit = limit
@@ -164,6 +181,18 @@ module Silth::DB
       references(name, **opts)
     end
 
+    # Foreign key on an existing column: `t.foreign_key :author_id, :users, on_delete: :nullify`.
+    def foreign_key(column : String | Symbol, to_table : String | Symbol, primary_key : String = "id",
+                    on_delete : Symbol? = nil, on_update : Symbol? = nil, name : String? = nil) : Nil
+      @foreign_keys << ForeignKeyDef.new(column.to_s, to_table.to_s, primary_key,
+        on_delete.try { |d| Schema.referential_action(d) }, on_update.try { |u| Schema.referential_action(u) }, name)
+    end
+
+    # Primary key over several columns (tables without `t.id`).
+    def primary_key(columns : Array(String | Symbol)) : Nil
+      @primary_key_columns = columns.map(&.to_s)
+    end
+
     def timestamps(null : Bool = true) : Nil
       timestamp(:created_at, null: null, default: null ? nil : :now)
       timestamp(:updated_at, null: null, default: null ? nil : :now)
@@ -176,7 +205,7 @@ module Silth::DB
     def index(columns : String | Symbol | Array, unique : Bool = false, name : String? = nil, using : String? = nil,
               where : String? = nil, opclass : String? = nil) : Nil
       cols = columns.is_a?(Array) ? columns.map(&.to_s) : [columns.to_s]
-      index_name = name || "index_#{@name}_on_#{cols.join("_and_")}"
+      index_name = name || Schema.index_name(@name, cols)
       @indexes << IndexDef.new(cols, unique, index_name, using, where, opclass)
     end
 
@@ -192,11 +221,8 @@ module Silth::DB
 
     def to_create_sql(if_not_exists : Bool = false) : Array(String)
       defs = @columns.map(&.to_sql(@dialect))
-      @foreign_keys.each do |fk|
-        clause = "FOREIGN KEY (#{@dialect.quote(fk.column)}) REFERENCES #{@dialect.quote_table(fk.table)} (#{@dialect.quote(fk.ref_column)})"
-        clause += " ON DELETE #{fk.on_delete}" if fk.on_delete
-        defs << clause
-      end
+      @primary_key_columns.try { |cols| defs << "PRIMARY KEY (#{cols.map { |c| @dialect.quote(c) }.join(", ")})" }
+      @foreign_keys.each { |fk| defs << fk.to_sql(@dialect) }
       statements = ["CREATE TABLE #{if_not_exists ? "IF NOT EXISTS " : ""}#{@dialect.quote_table(@name)} (\n  #{defs.join(",\n  ")}\n)"]
       @indexes.each { |idx| Schema.index_sql(@dialect, @name, idx).try { |sql| statements << sql } }
       statements
@@ -234,9 +260,16 @@ module Silth::DB
 
     def add_column(table : String | Symbol, name : String | Symbol, type : Symbol, **opts) : Nil
       builder = TableBuilder.new(table.to_s, dialect)
-      col = builder.column(name, type, **opts)
-      @db.query("ALTER TABLE #{dialect.quote_table(table.to_s)} ADD COLUMN #{col.to_sql(dialect)}")
-      builder.indexes.each { |idx| Schema.index_sql(dialect, table.to_s, idx).try { |sql| @db.query(sql) } }
+      builder.column(name, type, **opts)
+      add_columns(builder)
+    end
+
+    # Adds the columns (and their indexes) described by *builder* to its table.
+    def add_columns(builder : TableBuilder) : Nil
+      builder.columns.each do |col|
+        @db.query("ALTER TABLE #{dialect.quote_table(builder.name)} ADD COLUMN #{col.to_sql(dialect)}")
+      end
+      builder.indexes.each { |idx| Schema.index_sql(dialect, builder.name, idx).try { |sql| @db.query(sql) } }
     end
 
     def remove_column(table : String | Symbol, name : String | Symbol) : Nil
@@ -272,11 +305,42 @@ module Silth::DB
       @db.query(sql)
     end
 
-    def add_foreign_key(table : String | Symbol, column : String | Symbol, to_table : String | Symbol, on_delete : Symbol? = nil) : Nil
+    # Removes the index `add_index table, columns` created (default name).
+    def remove_index(table : String | Symbol, *, columns : String | Symbol | Array) : Nil
+      remove_index(table, Schema.index_name(table, columns))
+    end
+
+    def add_foreign_key(table : String | Symbol, column : String | Symbol, to_table : String | Symbol, on_delete : Symbol? = nil,
+                        on_update : Symbol? = nil, name : String? = nil, primary_key : String = "id") : Nil
       raise Unsupported.new("SQLite cannot add foreign keys to existing tables") if dialect.name == "sqlite"
-      sql = "ALTER TABLE #{dialect.quote_table(table.to_s)} ADD FOREIGN KEY (#{dialect.quote(column.to_s)}) REFERENCES #{dialect.quote_table(to_table.to_s)} (#{dialect.quote("id")})"
-      sql += " ON DELETE #{Schema.referential_action(on_delete)}" if on_delete
-      @db.query(sql)
+      fk = ForeignKeyDef.new(column.to_s, to_table.to_s, primary_key, on_delete.try { |d| Schema.referential_action(d) },
+        on_update.try { |u| Schema.referential_action(u) }, name)
+      @db.query("ALTER TABLE #{dialect.quote_table(table.to_s)} ADD #{fk.to_sql(dialect)}")
+    end
+
+    # Drops the foreign key on *column* (its name is looked up when not given).
+    def remove_foreign_key(table : String | Symbol, column : String | Symbol, name : String? = nil) : Nil
+      raise Unsupported.new("SQLite cannot drop foreign keys from existing tables") if dialect.name == "sqlite"
+      constraint = name || foreign_key_name(table.to_s, column.to_s) ||
+                   raise Error.new("No foreign key on #{table}.#{column}")
+      keyword = dialect.name == "mysql" ? "FOREIGN KEY" : "CONSTRAINT"
+      @db.query("ALTER TABLE #{dialect.quote_table(table.to_s)} DROP #{keyword} #{dialect.quote(constraint)}")
+    end
+
+    # Name of the foreign key constraint on `table.column`, if any.
+    def foreign_key_name(table : String, column : String) : String?
+      sql = case dialect.name
+            when "postgres"
+              "SELECT con.conname FROM pg_constraint con JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = con.conkey[1] " \
+              "WHERE con.contype = 'f' AND con.conrelid = ?::regclass AND a.attname = ?"
+            when "mysql"
+              "SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA = DATABASE() " \
+              "AND TABLE_NAME = ? AND COLUMN_NAME = ? AND REFERENCED_TABLE_NAME IS NOT NULL"
+            else
+              return nil
+            end
+      table_ref = dialect.name == "postgres" ? dialect.quote_table(table) : table
+      @db.query(sql, [table_ref, column] of Value).scalar.try(&.to_s)
     end
 
     # PostgreSQL extensions (`vector`, `pg_trgm`, `citext`…). No-op on other databases.
@@ -284,8 +348,18 @@ module Silth::DB
       @db.query("CREATE EXTENSION IF NOT EXISTS #{dialect.quote(name)}") if dialect.name == "postgres"
     end
 
+    def disable_extension(name : String) : Nil
+      @db.query("DROP EXTENSION IF EXISTS #{dialect.quote(name)}") if dialect.name == "postgres"
+    end
+
     def table_exists?(name : String | Symbol) : Bool
       @db.table_exists?(name.to_s)
+    end
+
+    # Default index name: `index_posts_on_user_id_and_published`.
+    def self.index_name(table : String | Symbol, columns : String | Symbol | Array) : String
+      cols = columns.is_a?(Array) ? columns.map(&.to_s) : [columns.to_s]
+      "index_#{table}_on_#{cols.join("_and_")}"
     end
 
     def self.referential_action(action : Symbol) : String

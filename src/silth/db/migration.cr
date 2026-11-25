@@ -1,28 +1,49 @@
 module Silth
   # Versioned schema change.
   #
+  # Write `change` when every step can be undone automatically (`create_table`,
+  # `add_column`, `rename_column`, `add_index`, `add_foreign_key`…): rolling back
+  # replays it backwards. Use `up`/`down` for anything else.
+  #
   # ```
   # class CreatePosts < Silth::Migration
   #   version 2026_11_24_120000
   #
-  #   def up
+  #   def change
   #     enable_extension "vector"
   #     create_table :posts do |t|
   #       t.id
   #       t.string :title, null: false
   #       t.timestamps
   #     end
-  #   end
-  #
-  #   def down
-  #     drop_table :posts
+  #     add_index :posts, :title
+  #     reversible do |dir|
+  #       dir.up { execute "UPDATE posts SET title = upper(title)" }
+  #       dir.down { execute "UPDATE posts SET title = lower(title)" }
+  #     end
   #   end
   # end
   # ```
   abstract class Migration
     class Irreversible < Silth::Error; end
 
+    # Runs a block in one direction only, inside `reversible`.
+    class Direction
+      def initialize(@reverting : Bool, @recorded : Array(-> Nil)?)
+      end
+
+      def up(&block : -> Nil) : Nil
+        block.call unless @reverting
+      end
+
+      def down(&block : -> Nil) : Nil
+        @recorded.try(&.<< block) if @reverting
+      end
+    end
+
     getter schema : DB::Schema
+    # Inverse commands collected while `change` is replayed to roll back (nil otherwise).
+    @inverse : Array(-> Nil)? = nil
 
     def initialize(@schema : DB::Schema)
     end
@@ -48,14 +69,148 @@ module Silth
       end
     end
 
-    abstract def up
-
-    def down
-      raise Irreversible.new("#{self.class.name} cannot be rolled back (no `down` method)")
+    def up
+      {% if @type.methods.any? { |m| m.name == "change" } %}
+        change
+      {% else %}
+        raise Silth::Error.new("#{self.class.name} must define `change` or `up`")
+      {% end %}
     end
 
-    delegate execute, create_table, drop_table, rename_table, add_column, remove_column, rename_column,
-      change_column, add_index, remove_index, add_foreign_key, enable_extension, table_exists?, to: @schema
+    def down
+      {% if @type.methods.any? { |m| m.name == "change" } %}
+        revert { change }
+      {% else %}
+        raise Irreversible.new("#{self.class.name} cannot be rolled back (no `down` or `change` method)")
+      {% end %}
+    end
+
+    # True while `change` is being replayed to roll back.
+    def reverting? : Bool
+      !@inverse.nil?
+    end
+
+    # Runs the block's schema commands backwards: each command is recorded, then
+    # its inverse runs, last command first.
+    def revert(&) : Nil
+      outer = @inverse
+      @inverse = recorded = [] of -> Nil
+      begin
+        yield
+      ensure
+        @inverse = outer
+      end
+      recorded.reverse_each(&.call)
+    end
+
+    # Direction-specific code inside `change` (data fixes, raw SQL).
+    def reversible(& : Direction ->) : Nil
+      yield Direction.new(reverting?, @inverse)
+    end
+
+    delegate table_exists?, to: @schema
+
+    def execute(sql : String) : Nil
+      irreversible!("execute (wrap it in `reversible`)") if reverting?
+      @schema.execute(sql)
+    end
+
+    def create_table(name : String | Symbol, if_not_exists : Bool = false, &block : DB::TableBuilder ->) : Nil
+      return record_inverse { @schema.drop_table(name) } if reverting?
+      @schema.create_table(name, if_not_exists, &block)
+    end
+
+    # Reversible when the block describes the table to recreate.
+    def drop_table(name : String | Symbol, if_exists : Bool = true, cascade : Bool = false, &block : DB::TableBuilder ->) : Nil
+      return record_inverse { @schema.create_table(name, &block) } if reverting?
+      @schema.drop_table(name, if_exists, cascade)
+    end
+
+    def drop_table(name : String | Symbol, if_exists : Bool = true, cascade : Bool = false) : Nil
+      irreversible!("drop_table without a block describing the table") if reverting?
+      @schema.drop_table(name, if_exists, cascade)
+    end
+
+    def rename_table(from : String | Symbol, to : String | Symbol) : Nil
+      return record_inverse { @schema.rename_table(to, from) } if reverting?
+      @schema.rename_table(from, to)
+    end
+
+    def add_column(table : String | Symbol, name : String | Symbol, type : Symbol, **opts) : Nil
+      return record_inverse { @schema.remove_column(table, name) } if reverting?
+      @schema.add_column(table, name, type, **opts)
+    end
+
+    # Reversible when the type (and options) of the removed column are given.
+    def remove_column(table : String | Symbol, name : String | Symbol, type : Symbol? = nil, **opts) : Nil
+      if reverting?
+        builder = DB::TableBuilder.new(table.to_s, @schema.dialect)
+        builder.column(name, type || irreversible!("remove_column without the column type"), **opts)
+        return record_inverse { @schema.add_columns(builder) }
+      end
+      @schema.remove_column(table, name)
+    end
+
+    def rename_column(table : String | Symbol, from : String | Symbol, to : String | Symbol) : Nil
+      return record_inverse { @schema.rename_column(table, to, from) } if reverting?
+      @schema.rename_column(table, from, to)
+    end
+
+    def change_column(table : String | Symbol, name : String | Symbol, type : Symbol, null : Bool = true, limit : Int32? = nil) : Nil
+      irreversible!("change_column (use up/down)") if reverting?
+      @schema.change_column(table, name, type, null, limit)
+    end
+
+    def add_index(table : String | Symbol, columns : String | Symbol | Array, unique : Bool = false, name : String? = nil,
+                  using : String? = nil, where : String? = nil, opclass : String? = nil) : Nil
+      return record_inverse { @schema.remove_index(table, name || DB::Schema.index_name(table, columns)) } if reverting?
+      @schema.add_index(table, columns, unique, name, using, where, opclass)
+    end
+
+    def remove_index(table : String | Symbol, name : String) : Nil
+      irreversible!("remove_index by name (pass the columns instead)") if reverting?
+      @schema.remove_index(table, name)
+    end
+
+    # Reversible: `remove_index :posts, columns: :title, unique: true`.
+    def remove_index(table : String | Symbol, *, columns : String | Symbol | Array, unique : Bool = false) : Nil
+      return record_inverse { @schema.add_index(table, columns, unique) } if reverting?
+      @schema.remove_index(table, columns: columns)
+    end
+
+    def add_foreign_key(table : String | Symbol, column : String | Symbol, to_table : String | Symbol, on_delete : Symbol? = nil,
+                        on_update : Symbol? = nil, name : String? = nil) : Nil
+      return record_inverse { @schema.remove_foreign_key(table, column, name) } if reverting?
+      @schema.add_foreign_key(table, column, to_table, on_delete, on_update, name)
+    end
+
+    # Reversible when the referenced table is given.
+    def remove_foreign_key(table : String | Symbol, column : String | Symbol, to_table : String | Symbol? = nil,
+                           on_delete : Symbol? = nil, name : String? = nil) : Nil
+      if reverting?
+        target = to_table || irreversible!("remove_foreign_key without the referenced table")
+        return record_inverse { @schema.add_foreign_key(table, column, target, on_delete, name: name) }
+      end
+      @schema.remove_foreign_key(table, column, name)
+    end
+
+    def enable_extension(name : String) : Nil
+      return record_inverse { @schema.disable_extension(name) } if reverting?
+      @schema.enable_extension(name)
+    end
+
+    def disable_extension(name : String) : Nil
+      return record_inverse { @schema.enable_extension(name) } if reverting?
+      @schema.disable_extension(name)
+    end
+
+    private def record_inverse(&block : -> Nil) : Nil
+      @inverse.not_nil! << block
+    end
+
+    private def irreversible!(what : String) : NoReturn
+      raise Irreversible.new("#{self.class.name} cannot be rolled back: #{what}")
+    end
 
     # Every concrete migration compiled into the program, sorted by version.
     def self.all : Array(Migration.class)
@@ -68,7 +223,7 @@ module Silth
 
   # Runs migrations and records them in `silth_migrations`.
   class Migrator
-    Log = ::Log.for("silth.migrate")
+    Log   = ::Log.for("silth.migrate")
     TABLE = "silth_migrations"
 
     record Status, version : Int64, name : String, applied : Bool, batch : Int32?
@@ -160,6 +315,16 @@ module Silth
       rolled
     end
 
+    # Records *versions* as applied without running them (after `db:schema:load`).
+    def mark_applied(versions : Array(Int64)) : Nil
+      done = applied
+      versions.reject { |v| done.has_key?(v) }.each do |version|
+        name = migrations_for_db.find { |m| m.version == version }.try(&.name) || "schema"
+        @db.table(TABLE).insert({"version" => version.as(DB::Value), "name" => name.as(DB::Value), "batch" => 1.as(DB::Value),
+                                 "migrated_at" => Time.utc.as(DB::Value)}, returning: nil)
+      end
+    end
+
     def reset : Array(String)
       rolled = [] of String
       until applied.empty?
@@ -248,7 +413,6 @@ module Silth
   end
 
   abstract class Factory(T)
-
     abstract def definition : T
 
     def fake : Fake.class

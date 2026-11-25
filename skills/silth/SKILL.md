@@ -62,10 +62,10 @@ class PostsController < ApplicationController
   end
 end
 
-# Migration
+# Migration (`change` is rolled back automatically; use up/down for raw SQL)
 class CreatePosts < Silth::Migration
   version 2026_11_24_120000
-  def up
+  def change
     create_table :posts do |t|
       t.id
       t.references :user
@@ -73,9 +73,6 @@ class CreatePosts < Silth::Migration
       t.text :body
       t.timestamps
     end
-  end
-  def down
-    drop_table :posts
   end
 end
 ```

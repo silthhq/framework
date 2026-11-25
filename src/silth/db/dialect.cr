@@ -195,7 +195,7 @@ module Silth::DB
       when :string_array  then "TEXT[]"
       when :integer_array then "BIGINT[]"
       when :float_array   then "DOUBLE PRECISION[]"
-      else                    type.to_s.upcase
+      else                    type.to_s
       end
     end
   end
@@ -290,7 +290,7 @@ module Silth::DB
       when :citext    then "VARCHAR(#{limit || 255})"
       when :string_array, :integer_array, :float_array then "JSON"
       when :tsvector  then raise Unsupported.new("tsvector columns require PostgreSQL; use a FULLTEXT index on MySQL")
-      else                 type.to_s.upcase
+      else                 type.to_s
       end
     end
   end
@@ -337,7 +337,7 @@ module Silth::DB
       when :json, :vector, :string_array, :integer_array, :float_array then "JSON"
       when :binary                        then "BLOB"
       when :tsvector                      then raise Unsupported.new("tsvector columns require PostgreSQL; SQLite offers FTS5 virtual tables")
-      else                                     type.to_s.upcase
+      else                                     type.to_s
       end
     end
   end

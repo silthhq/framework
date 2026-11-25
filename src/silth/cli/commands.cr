@@ -175,6 +175,7 @@ module Silth::Commands
     def run : Nil
       ran = Migrator.new(database).migrate(step)
       ran.empty? ? info("Nothing to migrate.") : ran.each { |m| success "Migrated #{m}" }
+      SchemaFile.auto_dump(database) unless ran.empty?
     end
   end
 
@@ -190,6 +191,7 @@ module Silth::Commands
     def run : Nil
       rolled = Migrator.new(database).rollback(step)
       rolled.empty? ? info("Nothing to roll back.") : rolled.each { |m| success "Rolled back #{m}" }
+      SchemaFile.auto_dump(database) unless rolled.empty?
     end
   end
 
@@ -206,6 +208,59 @@ module Silth::Commands
         [s.applied ? "✔ up".colorize(:green).to_s : "• pending".colorize(:yellow).to_s, s.version.to_s, s.name, s.batch.try(&.to_s) || ""]
       end
       table(["Status", "Version", "Migration", "Batch"], rows)
+    end
+  end
+
+  # Where the schema of a connection is dumped: `db/schema.cr` (default connection)
+  # or `db/<name>_schema.cr`.
+  module SchemaFile
+    def self.path(db : DB::Database) : String
+      db.name == DB.default ? "db/schema.cr" : "db/#{db.name}_schema.cr"
+    end
+
+    def self.dump(db : DB::Database) : String
+      file = path(db)
+      Dir.mkdir_p(File.dirname(file))
+      File.write(file, DB::SchemaDumper.new(db).dump)
+      file
+    end
+
+    # After migrations in development (`database.schema_dump` in config/database.yml).
+    def self.auto_dump(db : DB::Database) : Nil
+      return unless Silth.config.bool("database.schema_dump", Silth.env == "development") && Dir.exists?("db")
+      dump(db)
+    end
+  end
+
+  class DbSchemaDump < DatabaseCommand
+    command "db:schema:dump", "Write the database schema to db/schema.cr"
+    option connection : String?, "Database connection name"
+
+    def connection_name : String?
+      connection
+    end
+
+    def run : Nil
+      success "Schema written to #{SchemaFile.dump(database)}"
+    end
+  end
+
+  class DbSchemaLoad < DatabaseCommand
+    command "db:schema:load", "Recreate the database from db/schema.cr (drops every table)"
+    option connection : String?, "Database connection name"
+    option force : Bool = false, "Allow in production"
+
+    def connection_name : String?
+      connection
+    end
+
+    def run : Nil
+      raise Command::Error.new("Refusing to drop tables in production (use --force)") if Silth.production? && !force
+      db = database
+      definition = DB::SchemaDefinition.for(db.name) ||
+                   raise Command::Error.new("No schema compiled in for '#{db.name}': run `silth db:schema:dump` and require #{SchemaFile.path(db)} from src/cli.cr")
+      definition.load(db)
+      success "Loaded #{SchemaFile.path(db)} (version #{definition.version})"
     end
   end
 
@@ -232,6 +287,7 @@ module Silth::Commands
       migrator = Migrator.new(database)
       migrator.reset.each { |m| info "Rolled back #{m}" }
       migrator.migrate.each { |m| success "Migrated #{m}" }
+      SchemaFile.auto_dump(database)
     end
   end
 
@@ -243,6 +299,7 @@ module Silth::Commands
     def run : Nil
       raise Command::Error.new("Refusing to drop tables in production (use --force)") if Silth.production? && !force
       Migrator.new(database).fresh.each { |m| success "Migrated #{m}" }
+      SchemaFile.auto_dump(database)
       if seed
         Seeder.run_default
         success "Database seeded"
@@ -372,10 +429,10 @@ module Silth::Commands
       Silth.load_config
       d = Workflow.definitions[name]? || raise Command::Error.new("Unknown workflow #{name}. Known: #{Workflow.definitions.keys.join(", ")}")
       line(case format
-           when "dot" then d.to_dot
-           when "svg" then d.to_svg
-           else            d.to_mermaid
-           end)
+      when "dot" then d.to_dot
+      when "svg" then d.to_svg
+      else            d.to_mermaid
+      end)
     end
   end
 

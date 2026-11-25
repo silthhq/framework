@@ -18,6 +18,7 @@ PostgreSQL: `search([:title, :body], q)`, `order_by_relevance`, `nearest(:embedd
 Relations: `belongs_to x : X, optional: true`, `has_many xs : X, through: "pivot", dependent: :destroy`, `has_one`. Many-to-many: `attach_tags`, `detach_tags`, `sync_tags`.
 Validations: presence, length, format, email, url, inclusion, exclusion, numericality, uniqueness (`{scope: [...]}`), confirmation, acceptance, `if:`. Custom: `def validate; errors.add("f", "msg"); end`.
 Raw: `Silth::DB.query(sql, args).to_hashes`, `Silth::DB.table("x")…`, `Silth::DB.transaction { }`.
+Migrations: `def change` (create_table, add_column, rename_column, add_index, add_foreign_key, enable_extension… are reversed automatically; `remove_column :t, :c, :string` and `drop_table :t do |t| … end` too), `reversible { |dir| dir.up { execute "…" }; dir.down { … } }`, or `up`/`down`. `db/schema.cr` (`Silth::DB::SchemaDefinition.define(version: …) do |s| … end`) is rewritten after migrations in development; `silth db:schema:load` rebuilds the database from it.
 MySQL URL options: `?ssl=true`, `?statement_cache_size=256` (prepared statements per connection, `0` = close after use), `?prepared_statements=false` (client-side interpolation), `?server_public_key=path.pem` (pin the RSA key for `caching_sha2_password` without TLS), `?allow_cleartext_password=true` (LDAP/PAM over plain TCP, refused by default).
 
 ## Views
@@ -48,4 +49,4 @@ Telemetry: `Silth::Telemetry.trace("name") { |span| }`, `counter`, `histogram`.
 I18n: `config/locales/<locale>.yml`, `t("key", count: n, name: x)`, `l(time, "long")`.
 
 ## CLI
-`silth new|serve|build|test|g|routes|db:migrate|db:rollback|db:status|db:seed|db:fresh|queue:work|schedule:run|assets:build|api:docs|workflow:dump|export|key:generate|about|down|up`. Custom: `class X < Silth::Command; command "x:y", "desc"; argument a : String; option o : Bool = false; def run : Nil; end; end`.
+`silth new|serve|build|test|g|routes|db:migrate|db:rollback|db:status|db:seed|db:fresh|db:schema:dump|db:schema:load|queue:work|schedule:run|assets:build|api:docs|workflow:dump|export|key:generate|about|down|up`. Custom: `class X < Silth::Command; command "x:y", "desc"; argument a : String; option o : Bool = false; def run : Nil; end; end`.

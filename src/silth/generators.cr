@@ -180,19 +180,20 @@ module Silth
           CR
       end
 
+      # Writes a migration: `def change` when *down* is nil (reversible body),
+      # `up`/`down` otherwise.
       def migration(class_name : String, body : String, down : String? = nil) : Nil
         ts = timestamp
+        methods = if down
+                    "  def up\n#{body.rstrip}\n  end\n\n  def down\n    #{down}\n  end"
+                  else
+                    "  def change\n#{body.rstrip}\n  end"
+                  end
         create "db/migrations/#{ts}_#{Inflector.underscore(class_name)}.cr", <<-CR
           class #{class_name} < Silth::Migration
             version #{migration_version(ts)}
 
-            def up
-          #{body.rstrip}
-            end
-
-            def down
-              #{down || "drop_table :#{table}"}
-            end
+          #{methods}
           end
           CR
       end
@@ -461,8 +462,8 @@ module Silth
                else
                  "    # execute \"…\""
                end
-        down = (m = file.match(/^create_(\w+)$/)) ? "drop_table :#{m[1]}" : "# reverse the change"
-        g.migration(class_name, body, down)
+        reversible = file.matches?(/^create_\w+$/) || (file.matches?(/^add_\w+_to_\w+$/) && !args.empty?)
+        g.migration(class_name, body, reversible ? nil : "# reverse the change")
       when "controller"
         actions = args.empty? ? ["index"] : args
         base = class_name.sub(/Controller$/, "")
