@@ -92,9 +92,11 @@ module Silth
 
     def render(io : IO) : Nil
       prev = @view_io
+      started = Time.instant
       @view_io = io
       before_render
       render_template
+      Instrument.render("component #{self.class.name}", Time.instant - started)
     ensure
       @view_io = prev.not_nil!
     end

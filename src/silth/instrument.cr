@@ -84,11 +84,25 @@ module Silth
       end
     end
 
+    # A controller action: published when it starts (`duration` nil) and when
+    # it finished, filters included.
     struct Action < Event
       getter controller : String
       getter action : String
+      getter duration : Time::Span?
 
-      def initialize(@controller, @action)
+      def initialize(@controller, @action, @duration = nil)
+      end
+    end
+
+    # A translation lookup: `status` is "found", "fallback" (another locale
+    # answered) or "missing".
+    struct Translation < Event
+      getter key : String
+      getter locale : String
+      getter status : String
+
+      def initialize(@key, @locale, @status)
       end
     end
 
@@ -124,8 +138,21 @@ module Silth
       publish(Query.new(sql, args.map { |a| a.nil? ? "NULL" : a.to_s[0, 200] }, duration, connection, rows))
     end
 
-    def self.action(controller : String, action : String) : Nil
-      publish(Action.new(controller, action)) unless @@subscribers.empty?
+    # True when something listens (instrument only then: it is free otherwise).
+    def self.active? : Bool
+      !@@subscribers.empty?
+    end
+
+    def self.action(controller : String, action : String, duration : Time::Span? = nil) : Nil
+      publish(Action.new(controller, action, duration)) unless @@subscribers.empty?
+    end
+
+    def self.render(template : String, duration : Time::Span) : Nil
+      publish(Render.new(template, duration)) unless @@subscribers.empty?
+    end
+
+    def self.translation(key : String, locale : String, status : String) : Nil
+      publish(Translation.new(key, locale, status)) unless @@subscribers.empty?
     end
 
     # Measures a block and publishes a custom event with its duration.

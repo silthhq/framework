@@ -13,7 +13,7 @@
 </head>
 <body>
   <header class="topbar">
-    <a href="/" class="brand"><img src="/favicon.svg" alt="" width="22" height="22"> __APP_TITLE__</a>
+    <a href="/" class="brand"><svg viewBox="0 0 32 32" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M16 2C22.3 2 26 7 26 13.6C26 21 21.6 27.4 16 30C10.4 27.4 6 21 6 13.6C6 7 9.7 2 16 2ZM9.6 15.4a2.6 4.9 0 1 0 5.2 0a2.6 4.9 0 1 0 -5.2 0ZM17.2 15.4a2.6 4.9 0 1 0 5.2 0a2.6 4.9 0 1 0 -5.2 0Z"/></svg> __APP_TITLE__</a>
     <nav>
       <a href="/" class="<%= active_class("/", exact: true) %>"><%= t("nav.home") %></a>
       <a href="/counter" class="<%= active_class("/counter") %>">Live</a>
@@ -30,6 +30,6 @@
     <%= flash_messages %>
     <%= content %>
   </main>
-  <footer class="footer">Built with <a href="https://silth.dev">Silth</a></footer>
+  <footer class="footer"><span>Built with</span><a href="https://silth.dev">Silth</a></footer>
 </body>
 </html>

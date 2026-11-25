@@ -1,6 +1,6 @@
 <% content_for :title, "Welcome" %>
 <section class="hero">
-  <img class="hero-glyph" src="/favicon.svg" alt="" width="96" height="96">
+  <svg class="hero-mark" viewBox="0 0 32 32" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M16 2C22.3 2 26 7 26 13.6C26 21 21.6 27.4 16 30C10.4 27.4 6 21 6 13.6C6 7 9.7 2 16 2ZM9.6 15.4a2.6 4.9 0 1 0 5.2 0a2.6 4.9 0 1 0 -5.2 0ZM17.2 15.4a2.6 4.9 0 1 0 5.2 0a2.6 4.9 0 1 0 -5.2 0Z"/></svg>
   <h1>__APP_TITLE__</h1>
   <p class="lead"><%= t("app.tagline") %></p>
   <div class="row center">
@@ -11,7 +11,7 @@
 
 <section class="grid">
   <div class="card"><h3>Generate</h3><p class="muted">Scaffold a full CRUD in one command.</p><pre><code>silth g scaffold Post title:string body:text</code></pre></div>
-  <div class="card"><h3>Migrate</h3><p class="muted">Schema changes for PostgreSQL, MariaDB and SQLite.</p><pre><code>silth db:migrate</code></pre></div>
+  <div class="card"><h3>Migrate</h3><p class="muted">Reversible migrations for PostgreSQL, MySQL, MariaDB and SQLite.</p><pre><code>silth db:migrate</code></pre></div>
   <div class="card"><h3>Profile</h3><p class="muted">Every request is profiled in development.</p><pre><code>open /_silth/profiler</code></pre></div>
 </section>
 

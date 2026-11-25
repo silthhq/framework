@@ -174,7 +174,7 @@ module Silth
       "/_silth/silth.js"      => {"application/javascript; charset=utf-8", {{ read_file(__DIR__ + "/assets/silth.js") }}},
       "/_silth/livereload.js" => {"application/javascript; charset=utf-8", {{ read_file(__DIR__ + "/assets/livereload.js") }}},
       "/_silth/internal.css"  => {"text/css; charset=utf-8", Brand::INTERNAL_CSS},
-      "/_silth/logo.svg"      => {"image/svg+xml", Brand::LOGO_SVG},
+      "/_silth/logo.svg"      => {"image/svg+xml", Brand::ICON_SVG},
     }
 
     def call(ctx : Context, chain : Chain) : Nil

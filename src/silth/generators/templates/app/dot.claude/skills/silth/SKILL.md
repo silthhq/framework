@@ -94,6 +94,6 @@ Fakes: `Silth::Mailer.sent`, `Silth::Queue.fake`, `Silth::Events.fake`, `Silth::
 
 ## Debugging
 
-- Dev error page shows the failing source line; the profiler (`/_silth/profiler`) lists queries (duplicates = N+1), logs and events per request.
+- Dev error page shows the failing source line; the profiler (`/_silth/profiler/<token>`, token in the `X-Silth-Profile` header) has a timeline of the request plus queries (duplicates = N+1), logs, translations (missing keys) and events panels (`?panel=queries|logs|translations|events|request`).
 - CLI errors: re-run with `SILTH_TRACE=1`.
 - `silth about` prints drivers and configuration.

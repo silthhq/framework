@@ -91,6 +91,7 @@ module Silth
 
     # :nodoc:
     def __run_action(action : String, &) : Nil
+      started = Time.instant
       Instrument.action(self.class.name, action)
       begin
         {% begin %}
@@ -121,6 +122,8 @@ module Silth
           {% end %}
         {% end %}
         raise ex
+      ensure
+        Instrument.action(self.class.name, action, Time.instant - started)
       end
       @ctx.no_content unless @ctx.responded?
     end

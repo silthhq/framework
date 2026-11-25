@@ -1,6 +1,6 @@
 fr:
   app:
-    tagline: "Forgé dans l'ombre. Bâti pour durer."
+    tagline: "Votre app Silth tourne. Modifiez src/views/home/index.html.ecr pour commencer."
   nav:
     home: Accueil
     login: Connexion
