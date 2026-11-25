@@ -41,15 +41,20 @@ function sameKind(a, b) {
   return a.nodeType === b.nodeType && (a.nodeType !== 1 || a.tagName === b.tagName);
 }
 
+// Attributes the runtime sets on mounted components (never sent by the server).
+const RUNTIME_ATTRS = new Set(["data-silth-mounted", "data-silth-polling", "aria-busy"]);
+
 function morphNode(from, to) {
   if (from.nodeType !== 1) { if (from.nodeValue !== to.nodeValue) from.nodeValue = to.nodeValue; return; }
   if (from.hasAttribute("silth-ignore")) return;
-  if (from.hasAttribute("data-silth-live") && from !== to && from.dataset.silthMounted) return; // nested component keeps its own state
-  for (const attr of Array.from(from.attributes)) if (!to.hasAttribute(attr.name)) from.removeAttribute(attr.name);
+  // A nested live component keeps its own state while the parent passes the same props.
+  if (from.hasAttribute("data-silth-live") && from.dataset.silthMounted &&
+      from.getAttribute("data-silth-props") === to.getAttribute("data-silth-props")) return;
+  for (const attr of Array.from(from.attributes)) if (!to.hasAttribute(attr.name) && !RUNTIME_ATTRS.has(attr.name)) from.removeAttribute(attr.name);
   for (const attr of Array.from(to.attributes)) if (from.getAttribute(attr.name) !== attr.value) from.setAttribute(attr.name, attr.value);
   const focused = document.activeElement === from;
   if (from.tagName === "INPUT" || from.tagName === "TEXTAREA" || from.tagName === "SELECT") {
-    if (!focused) {
+    if (!focused && from.type !== "file") {
       if (from.type === "checkbox" || from.type === "radio") from.checked = to.hasAttribute("checked");
       else if ("value" in to) from.value = to.getAttribute("value") ?? to.value ?? "";
     }
@@ -127,6 +132,9 @@ function applyResponse(data) {
     el.dataset.silthState = data.s;
   }
   (data.emits || []).forEach(({ event, payload }) => window.dispatchEvent(new CustomEvent(`silth:${event}`, { detail: payload })));
+  // notify_parent: actions of the enclosing live component
+  const parent = el?.parentElement?.closest("[data-silth-live]");
+  if (parent) (data.parent || []).forEach(({ a, args }) => call(parent, a, args));
 }
 
 /* -------------------------------------------------------- components */
@@ -174,6 +182,46 @@ function parseArgs(el) {
   try { const v = JSON.parse(raw); return Array.isArray(v) ? v : [v]; } catch { return [raw]; }
 }
 
+/* ------------------------------------------------------------ uploads */
+
+// Uploads one file to a temporary location; resolves with its signed token.
+// Progress is exposed as `data-silth-progress` (0-100) on the input and `silth:upload-progress` events.
+function uploadFile(file, input) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const body = new FormData();
+    body.append("file", file);
+    xhr.open("POST", "/_silth/live/upload");
+    xhr.setRequestHeader("X-CSRF-Token", csrfToken());
+    xhr.responseType = "json";
+    xhr.upload.onprogress = (e) => {
+      if (!e.lengthComputable) return;
+      const percent = Math.round((e.loaded / e.total) * 100);
+      input.dataset.silthProgress = String(percent);
+      input.dispatchEvent(new CustomEvent("silth:upload-progress", { bubbles: true, detail: { file: file.name, percent } }));
+    };
+    xhr.onload = () => (xhr.status < 300 && xhr.response?.token ? resolve(xhr.response.token) : reject(new Error(xhr.response?.error || `Upload failed (${xhr.status})`)));
+    xhr.onerror = () => reject(new Error("Upload failed"));
+    xhr.send(body);
+  });
+}
+
+async function uploadFiles(root, input, name) {
+  const files = Array.from(input.files || []);
+  root.setAttribute("aria-busy", "true");
+  try {
+    const tokens = [];
+    for (const file of files) tokens.push(await uploadFile(file, input));
+    await call(root, null, [], { [name]: input.multiple ? tokens : (tokens[0] ?? null) });
+  } catch (e) {
+    console.error("[silth]", e);
+    input.dispatchEvent(new CustomEvent("silth:upload-error", { bubbles: true, detail: { message: e.message } }));
+  } finally {
+    root.removeAttribute("aria-busy");
+    delete input.dataset.silthProgress;
+  }
+}
+
 function inputValue(el) {
   if (el.type === "checkbox") return el.checked;
   if (el.type === "number" || el.type === "range") return el.value === "" ? null : Number(el.value);
@@ -213,6 +261,7 @@ const modelHandler = (e) => {
   if (mods.lazy && e.type === "input") return;
   const root = componentOf(el);
   if (!root) return;
+  if (el.type === "file") { if (e.type === "change") uploadFiles(root, el, attr.value); return; }
   const send = () => call(root, null, [], { [attr.value]: inputValue(el) });
   clearTimeout(timers.get(el));
   if (mods.ms > 0 && e.type === "input") timers.set(el, setTimeout(send, mods.ms)); else send();

@@ -297,10 +297,12 @@ module Silth::View
       SafeHTML.new(String.build { |io| klass.new(**props).render(io) })
     end
 
-    # Block form: `<% component CardComponent, title: "Hi" do %>…<% end %>`
-    def component(klass : T.class, **props, &block : -> _) : Nil forall T
+    # Block form: `<% component CardComponent, title: "Hi" do |card| %>…<% end %>`.
+    # The block is the default slot; `card.slot :name do … end` inside it fills a
+    # named slot. It runs before the component renders, so every slot is known.
+    def component(klass : T.class, **props, &block : T -> _) : Nil forall T
       instance = klass.new(**props)
-      instance.slot = -> { block.call; nil }
+      instance.default_slot_html = capture { block.call(instance) }.to_s
       instance.render(@view_io)
     end
 

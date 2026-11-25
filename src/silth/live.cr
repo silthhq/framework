@@ -27,11 +27,25 @@ module Silth
   # ```
   #
   # Embed with `<%= live SearchComponent, query: "crystal" %>` or as a page: `live "/search", SearchComponent`.
+  #
+  # A live template can embed other live components. Each child keeps its own
+  # state across the parent's re-renders, until the parent passes it new props:
+  #
+  # ```erb
+  # <% todos.each do |todo| %>
+  #   <%= live TodoItem, key: "todo-#{todo.id}", todo_id: todo.id %>
+  # <% end %>
+  # ```
+  #
+  # The child calls the parent's actions with `notify_parent("refresh")`.
   abstract class LiveComponent < Component
     @__live_id : String? = nil
     @__emits = [] of {String, String}
+    @__parent_calls = [] of {String, String}
     @__redirect : String? = nil
     @__user : Auth::Authenticatable? = nil
+    @__props_fingerprint : String? = nil
+    @__child_seq = 0
 
     # Marks a method as callable from the browser: `action def increment … end`.
     macro action(definition)
@@ -78,6 +92,37 @@ module Silth
 
     def redirect_to(url : String) : Nil
       @__redirect = url
+    end
+
+    # Calls an action of the enclosing live component, in the browser, once this
+    # response is applied: `notify_parent("item_removed", id)`.
+    def notify_parent(action : String, *args) : Nil
+      @__parent_calls << {action, args.to_a.to_json}
+    end
+
+    # Renders a nested live component. Its id derives from this component's id and
+    # `key` (default: its position), so it survives this component's re-renders.
+    def live(klass : T.class, key : String | Int32 | Nil = nil, **props) : SafeHTML forall T
+      @__child_seq += 1
+      child = klass.new(**props)
+      child.live_id = "#{live_id}-#{key || "#{klass.name.split("::").last.underscore}-#{@__child_seq}"}"
+      child.props_fingerprint = Crypto.sha256(props.to_s)[0, 16]
+      child.mount
+      SafeHTML.new(child.render_live)
+    end
+
+    def render(io : IO) : Nil
+      @__child_seq = 0
+      super
+    end
+
+    # :nodoc:
+    def props_fingerprint=(@__props_fingerprint : String?)
+    end
+
+    # :nodoc:
+    def __parent_calls : Array({String, String})
+      @__parent_calls
     end
 
     def live_id : String
@@ -179,6 +224,7 @@ module Silth
       String.build do |io|
         io << %(<div id=") << live_id << %(" data-silth-live=") << self.class.name << %(" data-silth-state=") << HTML.escape(signed_state) << '"'
         io << %( data-silth-subscribe=") << HTML.escape(subs.join(',')) << '"' unless subs.empty?
+        io << %( data-silth-props=") << @__props_fingerprint << '"' if @__props_fingerprint
         io << '>' << inner << "</div>"
       end
     end
@@ -267,6 +313,18 @@ module Silth
               end
             end
           end
+          unless component.__parent_calls.empty?
+            json.field "parent" do
+              json.array do
+                component.__parent_calls.each do |(action, args)|
+                  json.object do
+                    json.field "a", action
+                    json.field("args") { json.raw(args) }
+                  end
+                end
+              end
+            end
+          end
         end
       end
     end
@@ -281,6 +339,9 @@ module Silth
           Realtime.serve_channels(ctx)
         elsif ctx.path == PATH && Realtime.upgrade?(ctx)
           serve_socket(ctx)
+        elsif ctx.path == Upload::PATH
+          verify_origin!(ctx)
+          Upload.handle(ctx)
         elsif ctx.path == PATH && ctx.request.method == "POST"
           verify_origin!(ctx)
           body = ctx.request.body.try(&.gets_to_end) || "{}"

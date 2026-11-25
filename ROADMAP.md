@@ -9,7 +9,7 @@ Next iterations of stage 1:
 - [x] Binary prepared statements for MySQL (per-connection LRU cache, interpolation fallback) and RSA full auth for `caching_sha2_password` / `sha256_password` without TLS
 - [x] Reversible `change` migrations and schema dumps (`db/schema.cr`)
 - [x] Polymorphic relations, counter caches, optimistic locking
-- [ ] Named slots for components, live component file uploads, nested live components
+- [x] Named slots for components, live component file uploads, nested live components
 - [ ] Redis/PostgreSQL `LISTEN/NOTIFY` pub/sub adapter configured from YAML for multi-node live components
 - [ ] Job batches, unique jobs and rate-limited queues
 - [ ] Mail previews in the profiler, markdown mail templates
