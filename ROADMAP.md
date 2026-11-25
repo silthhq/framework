@@ -14,7 +14,7 @@ Next iterations of stage 1:
 - [x] Job batches, unique jobs and rate-limited queues
 - [x] Mail previews in the profiler, markdown mail templates
 - [x] Log, cache and session drivers for PostgreSQL `UNLOGGED` tables
-- [ ] Official Docker images and a `silth deploy` preset
+- [x] Official Docker images and a `silth deploy` preset
 
 ## Stage 2 — ecosystem
 

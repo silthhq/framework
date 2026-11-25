@@ -96,6 +96,7 @@ describe "silth g migration" do
         files = Dir.glob("db/migrations/*.cr")
         File.read(files.find(&.includes?("add_sku")).not_nil!).should contain("  def change\n    add_column :products, :sku, :string")
         File.read(files.find(&.includes?("backfill")).not_nil!).should contain("  def down\n    # reverse the change\n  end")
+        files.map { |f| File.basename(f)[0, 14] }.uniq.size.should eq(2) # same second, distinct versions
       end
     ensure
       FileUtils.rm_rf(dir)

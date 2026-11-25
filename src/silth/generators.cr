@@ -117,8 +117,12 @@ module Silth
         @output.puts "  #{"update".colorize(:cyan)}  #{path}"
       end
 
+      # Migration timestamp: now, or just after the latest migration, so that two
+      # migrations generated in the same second never share a version.
       def timestamp : String
-        Time.utc.to_s("%Y%m%d%H%M%S")
+        now = Time.utc.to_s("%Y%m%d%H%M%S").to_i64
+        latest = Dir.glob("db/migrations/*.cr").compact_map { |f| File.basename(f)[0, 14].to_i64? }.max? || 0_i64
+        {now, latest + 1}.max.to_s
       end
 
       def migration_version(ts : String) : String

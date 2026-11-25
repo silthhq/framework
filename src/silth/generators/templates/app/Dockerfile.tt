@@ -1,20 +1,18 @@
-# Multi-stage build producing a small static-ish image.
-FROM crystallang/crystal:1.22-alpine AS build
+# Multi-stage build on the official Silth images (see docker/ in the Silth
+# repository). Override them with --build-arg SILTH_BUILDER=… / SILTH_RUNTIME=….
+ARG SILTH_BUILDER=ghcr.io/killidia/silth-builder:1.22
+ARG SILTH_RUNTIME=ghcr.io/killidia/silth-runtime:3.20
+
+FROM ${SILTH_BUILDER} AS build
 WORKDIR /app
-RUN apk add --no-cache sqlite-dev sqlite-static
 COPY shard.yml shard.lock* ./
 RUN shards install --production
 COPY . .
 RUN shards build __APP_NAME__ cli --release --static --no-debug && \
     SILTH_ENV=production ./bin/cli assets:build
 
-FROM alpine:3.20
-RUN apk add --no-cache ca-certificates tzdata && adduser -D app
-WORKDIR /app
-COPY --from=build /app/bin /app/bin
-COPY --from=build /app/public /app/public
-COPY --from=build /app/config /app/config
-USER app
-ENV SILTH_ENV=production PORT=3000
-EXPOSE 3000
+FROM ${SILTH_RUNTIME}
+COPY --from=build --chown=app /app/bin /app/bin
+COPY --from=build --chown=app /app/public /app/public
+COPY --from=build --chown=app /app/config /app/config
 CMD ["/app/bin/__APP_NAME__"]

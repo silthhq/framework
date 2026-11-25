@@ -51,4 +51,4 @@ Telemetry: `Silth::Telemetry.trace("name") { |span| }`, `counter`, `histogram`.
 I18n: `config/locales/<locale>.yml`, `t("key", count: n, name: x)`, `l(time, "long")`.
 
 ## CLI
-`silth new|serve|build|test|g|routes|db:migrate|db:rollback|db:status|db:seed|db:fresh|db:schema:dump|db:schema:load|queue:work|schedule:run|assets:build|api:docs|workflow:dump|export|key:generate|about|down|up`. Custom: `class X < Silth::Command; command "x:y", "desc"; argument a : String; option o : Bool = false; def run : Nil; end; end`.
+`silth new|serve|build|test|g|routes|db:migrate|db:rollback|db:status|db:seed|db:fresh|db:schema:dump|db:schema:load|queue:work|schedule:run|assets:build|api:docs|workflow:dump|export|key:generate|about|down|up|deploy:init|deploy|deploy:status|deploy:rollback`. Deploy: config/deploy.yml (`image`, `servers`, `domain`, `env_file`, `registry`, `workers`, `scheduler`, `volumes`), zero-downtime rollout over SSH + Docker + Caddy, `silth deploy --dry-run`. Custom: `class X < Silth::Command; command "x:y", "desc"; argument a : String; option o : Bool = false; def run : Nil; end; end`.
