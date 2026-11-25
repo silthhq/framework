@@ -118,10 +118,11 @@ module Silth
         same_site: HTTP::Cookie::SameSite.parse?(config.string("session.same_site", "lax")) || HTTP::Cookie::SameSite::Lax,
         max_age: config.int?("session.lifetime").try(&.minutes),
       )
-      if config.string("session.driver", "cookie") == "cache"
-        CacheSessionStore.new(name, verifier("session"), options, config.int("session.lifetime", 120).minutes)
-      else
-        CookieSessionStore.new(name, encryptor("session"), options)
+      lifetime = config.int("session.lifetime", 120).minutes
+      case config.string("session.driver", "cookie")
+      when "cache"    then CacheSessionStore.new(name, verifier("session"), options, lifetime)
+      when "postgres" then PostgresSessionStore.new(name, verifier("session"), options, lifetime, config.string?("session.connection"))
+      else                 CookieSessionStore.new(name, encryptor("session"), options)
       end
     end
   end

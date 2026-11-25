@@ -99,6 +99,8 @@ module Silth::DB
     getter dialect : Dialect
     # Composite primary key (`t.primary_key [:post_id, :tag_id]`).
     getter primary_key_columns : Array(String)? = nil
+    # PostgreSQL UNLOGGED table: no write-ahead log (fast writes, emptied after a crash).
+    property? unlogged = false
 
     def initialize(@name : String, @dialect : Dialect)
     end
@@ -228,7 +230,8 @@ module Silth::DB
       defs = @columns.map(&.to_sql(@dialect))
       @primary_key_columns.try { |cols| defs << "PRIMARY KEY (#{cols.map { |c| @dialect.quote(c) }.join(", ")})" }
       @foreign_keys.each { |fk| defs << fk.to_sql(@dialect) }
-      statements = ["CREATE TABLE #{if_not_exists ? "IF NOT EXISTS " : ""}#{@dialect.quote_table(@name)} (\n  #{defs.join(",\n  ")}\n)"]
+      kind = @unlogged && @dialect.name == "postgres" ? "UNLOGGED TABLE" : "TABLE"
+      statements = ["CREATE #{kind} #{if_not_exists ? "IF NOT EXISTS " : ""}#{@dialect.quote_table(@name)} (\n  #{defs.join(",\n  ")}\n)"]
       @indexes.each { |idx| Schema.index_sql(@dialect, @name, idx).try { |sql| statements << sql } }
       statements
     end
@@ -249,10 +252,19 @@ module Silth::DB
       @db.exec_script(sql)
     end
 
-    def create_table(name : String | Symbol, if_not_exists : Bool = false, & : TableBuilder ->) : Nil
+    # `unlogged: true` creates a PostgreSQL UNLOGGED table (ignored by other databases).
+    def create_table(name : String | Symbol, if_not_exists : Bool = false, unlogged : Bool = false, & : TableBuilder ->) : Nil
       builder = TableBuilder.new(name.to_s, dialect)
+      builder.unlogged = unlogged
       yield builder
       builder.to_create_sql(if_not_exists).each { |sql| @db.query(sql) }
+    end
+
+    # Creates the table unless it exists. Unlike `IF NOT EXISTS`, no DDL runs when
+    # it does, so the current transaction stays open on MySQL.
+    def ensure_table(name : String | Symbol, unlogged : Bool = false, & : TableBuilder ->) : Nil
+      return if table_exists?(name)
+      create_table(name, if_not_exists: true, unlogged: unlogged) { |t| yield t }
     end
 
     def drop_table(name : String | Symbol, if_exists : Bool = true, cascade : Bool = false) : Nil

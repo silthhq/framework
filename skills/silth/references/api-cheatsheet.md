@@ -20,6 +20,7 @@ Locking: `optimistic_locking` + `t.lock_version` → `Silth::ORM::StaleObjectErr
 Validations: presence, length, format, email, url, inclusion, exclusion, numericality, uniqueness (`{scope: [...]}`), confirmation, acceptance, `if:`. Custom: `def validate; errors.add("f", "msg"); end`.
 Raw: `Silth::DB.query(sql, args).to_hashes`, `Silth::DB.table("x")…`, `Silth::DB.transaction { }`.
 Migrations: `def change` (create_table, add_column, rename_column, add_index, add_foreign_key, enable_extension… are reversed automatically; `remove_column :t, :c, :string` and `drop_table :t do |t| … end` too), `reversible { |dir| dir.up { execute "…" }; dir.down { … } }`, or `up`/`down`. `db/schema.cr` (`Silth::DB::SchemaDefinition.define(version: …) do |s| … end`) is rewritten after migrations in development; `silth db:schema:load` rebuilds the database from it.
+PostgreSQL UNLOGGED drivers: cache `default: postgres` (config/cache.yml), sessions `driver: postgres` (config/session.yml), logs `postgres: {connection: primary, level: warn, retention_days: 14}` (config/logging.yml); `create_table :x, unlogged: true`.
 MySQL URL options: `?ssl=true`, `?statement_cache_size=256` (prepared statements per connection, `0` = close after use), `?prepared_statements=false` (client-side interpolation), `?server_public_key=path.pem` (pin the RSA key for `caching_sha2_password` without TLS), `?allow_cleartext_password=true` (LDAP/PAM over plain TCP, refused by default).
 
 ## Views

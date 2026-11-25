@@ -1,4 +1,4 @@
-default: memory           # memory | file | database | redis | null
+default: memory           # memory | file | database | postgres | redis | null
 prefix: "__APP_NAME__:"
 stores:
   file:

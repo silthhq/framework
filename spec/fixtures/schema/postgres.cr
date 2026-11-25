@@ -54,6 +54,11 @@ Silth::DB::SchemaDefinition.define(version: 20260101000001, connection: "fixture
     t.index ["slug"], unique: true, name: "tags_slug_key"
   end
 
+  s.create_table "visits", unlogged: true do |t|
+    t.id
+    t.string "path", null: false, limit: 255
+  end
+
   s.add_foreign_key "note_tags", "note_id", "notes", on_delete: :cascade, name: "note_tags_note_id_fkey"
   s.add_foreign_key "note_tags", "tag_id", "tags", on_delete: :cascade, on_update: :cascade, name: "note_tags_tag_id_fkey"
   s.add_foreign_key "notes", "author_id", "authors", on_delete: :nullify, name: "notes_author_id_fkey"

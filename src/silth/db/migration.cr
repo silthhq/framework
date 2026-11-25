@@ -115,9 +115,9 @@ module Silth
       @schema.execute(sql)
     end
 
-    def create_table(name : String | Symbol, if_not_exists : Bool = false, &block : DB::TableBuilder ->) : Nil
+    def create_table(name : String | Symbol, if_not_exists : Bool = false, unlogged : Bool = false, &block : DB::TableBuilder ->) : Nil
       return record_inverse { @schema.drop_table(name) } if reverting?
-      @schema.create_table(name, if_not_exists, &block)
+      @schema.create_table(name, if_not_exists, unlogged, &block)
     end
 
     # Reversible when the block describes the table to recreate.

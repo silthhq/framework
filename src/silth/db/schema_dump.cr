@@ -24,7 +24,8 @@ module Silth::DB
     # One table as read from the database. `id_type` is set when the primary key is
     # what `t.id` creates (auto-increment integer or UUID).
     record TableInfo, name : String, columns : Array(ColumnInfo), primary_key : Array(String),
-      id_type : Symbol?, indexes : Array(IndexInfo), raw_indexes : Array(String), foreign_keys : Array(ForeignKeyInfo)
+      id_type : Symbol?, indexes : Array(IndexInfo), raw_indexes : Array(String), foreign_keys : Array(ForeignKeyInfo),
+      unlogged : Bool = false
 
     # Types written with a `t.<type>` helper (the others use `t.column`).
     HELPER_TYPES = %w(string text integer bigint smallint float real boolean date time binary uuid inet citext json
@@ -39,7 +40,8 @@ module Silth::DB
     end
 
     # Framework tables created on demand, not part of the application schema.
-    IGNORED_TABLES = [Migrator::TABLE, "silth_pubsub_messages", "silth_jobs", "silth_failed_jobs", "silth_job_batches"]
+    IGNORED_TABLES = [Migrator::TABLE, "silth_pubsub_messages", "silth_jobs", "silth_failed_jobs", "silth_job_batches",
+                      "silth_cache", "silth_unlogged_cache", "silth_sessions", "silth_logs"]
 
     getter db : Database
 
@@ -74,7 +76,7 @@ module Silth::DB
     end
 
     private def render_table(io : IO, table : TableInfo, inline_foreign_keys : Bool) : Nil
-      io << "  s.create_table " << table.name.inspect << " do |t|\n"
+      io << "  s.create_table " << table.name.inspect << (table.unlogged ? ", unlogged: true" : "") << " do |t|\n"
       table.columns.each do |col|
         if table.id_type && table.primary_key == [col.name]
           io << "    " << render_id(col, table.id_type.not_nil!) << '\n'

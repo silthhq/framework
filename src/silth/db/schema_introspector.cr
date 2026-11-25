@@ -99,7 +99,8 @@ module Silth::DB
           column(col_name, sql_type, r[2] == true, default, identity, r[5].to_s == "s")
         end
         indexes, raw_indexes = indexes(ref)
-        Dumper::TableInfo.new(name, columns, pk, id_type, indexes, raw_indexes, foreign_keys(ref))
+        unlogged = @db.scalar("SELECT relpersistence::text FROM pg_class WHERE oid = ?::regclass", [ref] of Value) == "u"
+        Dumper::TableInfo.new(name, columns, pk, id_type, indexes, raw_indexes, foreign_keys(ref), unlogged)
       end
 
       private def primary_key(ref : String) : Array(String)

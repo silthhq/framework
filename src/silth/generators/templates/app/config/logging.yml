@@ -1,6 +1,10 @@
 level: debug
 format: pretty            # pretty | json
 # file: log/app.log
+# postgres:               # also write to the UNLOGGED table silth_logs
+#   connection: primary
+#   level: warn
+#   retention_days: 14
 
 when@production:
   level: info

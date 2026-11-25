@@ -1,4 +1,4 @@
-driver: cookie            # cookie | cache
+driver: cookie            # cookie | cache | postgres (UNLOGGED table)
 cookie: ___APP_NAME___session
 lifetime: 120             # minutes
 same_site: lax
