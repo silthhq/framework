@@ -5,7 +5,9 @@ module Silth::Generators
 
     getter created = [] of String
 
-    def initialize(@name : String, @database : String = "sqlite", @silth_path : String? = nil, @output : IO = STDOUT)
+    # *edge* depends on the framework's main branch and the `edge` images instead
+    # of the current release line.
+    def initialize(@name : String, @database : String = "sqlite", @silth_path : String? = nil, @output : IO = STDOUT, @edge : Bool = false)
     end
 
     def app_name : String
@@ -24,12 +26,21 @@ module Silth::Generators
       end
     end
 
+    # The `silth` entry of the app's shard.yml: a local checkout, the main branch
+    # (`--edge`), or the release line of this CLI (`~> 0.1.0`: 0.1.x patches only).
     def dependency : String
       if path = @silth_path
         "    path: #{path}"
-      else
+      elsif @edge
         "    github: silthhq/framework\n    branch: main"
+      else
+        "    github: silthhq/framework\n    version: ~> #{Silth::VERSION.split(/[-+]/).first}"
       end
+    end
+
+    # Tag of the official images the app's Dockerfile builds on.
+    def image_tag : String
+      @edge ? "edge" : Silth.release_line
     end
 
     def run(target : String = @name) : Nil
@@ -41,6 +52,7 @@ module Silth::Generators
         "__TEST_DB_URL__"  => @database == "sqlite" ? "sqlite3::memory:" : database_url("test"),
         "__APP_KEY__"      => Crypto.generate_app_key,
         "__SILTH_DEP__"    => dependency,
+        "__SILTH_IMAGE__"  => image_tag,
       }
       TEMPLATES.each do |path, content|
         dest = path.rchop(".tt").split('/').map { |part| part.starts_with?("dot.") ? "." + part.lchop("dot.") : part }.join('/')

@@ -31,7 +31,7 @@ module Silth::Global
   def self.help : Nil
     puts CLI::BANNER.colorize(:light_cyan)
     puts "\n  #{"Framework".colorize(:yellow)}"
-    [{"new <name>", "Create a new application (--db=sqlite|postgres|mysql)"},
+    [{"new <name>", "Create a new application (--db=sqlite|postgres|mysql, --edge for the main branch)"},
      {"serve", "Development server with rebuild on change and live reload"},
      {"build", "Production build (release binaries + fingerprinted assets)"},
      {"test", "Run the test suite (crystal spec)"},
@@ -88,12 +88,13 @@ module Silth::Global
     def self.run(args : Array(String)) : Int32
       name = args.find { |a| !a.starts_with?('-') }
       unless name
-        puts "Usage: silth new <name> [--db=sqlite|postgres|mysql] [--path-to-silth=../framework] [--install]"
+        puts "Usage: silth new <name> [--db=sqlite|postgres|mysql] [--path-to-silth=../framework] [--edge] [--install]"
         return 1
       end
       db = args.find(&.starts_with?("--db="))
       path = args.find(&.starts_with?("--path-to-silth="))
-      generator = Generators::App.new(name, db.try(&.split('=', 2).last) || "sqlite", path.try(&.split('=', 2).last))
+      generator = Generators::App.new(name, db.try(&.split('=', 2).last) || "sqlite", path.try(&.split('=', 2).last),
+        edge: args.includes?("--edge"))
       puts "\n#{"◆".colorize(:light_cyan)} Creating #{generator.app_title.colorize.bold} in ./#{name}\n\n"
       generator.run(name)
       if args.includes?("--install")

@@ -1,6 +1,7 @@
-# Multi-stage build on the official Silth images (docker/ in silthhq/framework). Override them with --build-arg SILTH_BUILDER=… / SILTH_RUNTIME=….
-ARG SILTH_BUILDER=ghcr.io/silthhq/builder:1.22
-ARG SILTH_RUNTIME=ghcr.io/silthhq/runtime:3.20
+# Multi-stage build on the official Silth images (docker/ in silthhq/framework), tagged
+# by release line. Override them with --build-arg SILTH_BUILDER=… / SILTH_RUNTIME=….
+ARG SILTH_BUILDER=ghcr.io/silthhq/builder:__SILTH_IMAGE__
+ARG SILTH_RUNTIME=ghcr.io/silthhq/runtime:__SILTH_IMAGE__
 
 FROM ${SILTH_BUILDER} AS build
 WORKDIR /app

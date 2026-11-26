@@ -1,0 +1,154 @@
+# Release on a `vX.Y.Z` tag: checks that the tag, shard.yml, Silth::VERSION and
+# CHANGELOG.md agree, builds the `silth` CLI for Linux (static, amd64 and arm64)
+# and macOS (arm64 and x86_64), publishes them with SHA256SUMS as a GitHub
+# release, then installs the release with scripts/install.sh (the script
+# silth.dev/install.sh serves). The Docker images are published by
+# docker-images.yml on the same tag.
+#
+#   git tag -a v0.1.0 -m "Silth 0.1.0" && git push origin v0.1.0
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CRYSTAL_VERSION: "1.22"
+
+jobs:
+  check:
+    name: check the version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        name: Tag, shard.yml, Silth::VERSION and CHANGELOG.md agree
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          shard=$(sed -n 's/^version: *//p' shard.yml)
+          code=$(sed -n 's/^ *VERSION = "\(.*\)"/\1/p' src/silth.cr)
+          [ "$version" = "$shard" ] || { echo "::error::tag $version but shard.yml says $shard"; exit 1; }
+          [ "$version" = "$code" ] || { echo "::error::tag $version but Silth::VERSION is $code"; exit 1; }
+          grep -q "^## \[$version\]" CHANGELOG.md || { echo "::error::CHANGELOG.md has no [$version] section"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Release notes from CHANGELOG.md
+        run: |
+          awk -v v="${{ steps.version.outputs.version }}" '
+            $0 ~ "^## \\[" v "\\]" { on = 1; next }
+            on && /^## \[/ { exit }
+            on { print }' CHANGELOG.md > notes.md
+          test -s notes.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: notes
+          path: notes.md
+
+  linux:
+    name: linux ${{ matrix.arch }}
+    needs: check
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      # Built in the Crystal Alpine image (musl, static libraries) with docker run:
+      # JavaScript actions cannot run inside Alpine containers on arm64 runners.
+      - name: Static build
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src "crystallang/crystal:${CRYSTAL_VERSION}-alpine" \
+            sh -c "apk add --no-cache sqlite-dev sqlite-static && shards build silth --release --static --no-debug"
+          file bin/silth
+          bin/silth version | grep -q "Silth ${{ needs.check.outputs.version }}"
+          bin/silth new "$RUNNER_TEMP/demo" > /dev/null && test -f "$RUNNER_TEMP/demo/shard.yml"
+      - name: Package
+        run: |
+          mkdir -p pkg dist && cp bin/silth LICENSE README.md CHANGELOG.md pkg/
+          tar -czf dist/silth-linux-${{ matrix.arch }}.tar.gz -C pkg .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: silth-linux-${{ matrix.arch }}
+          path: dist/*.tar.gz
+
+  macos:
+    name: macos ${{ matrix.arch }}
+    needs: check
+    strategy:
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: x86_64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: ${{ env.CRYSTAL_VERSION }}
+      # libsqlite3 ships with macOS; OpenSSL, PCRE2, libgc and libevent come
+      # with Crystal (Homebrew), which compiling Silth apps needs anyway.
+      - name: Build
+        run: |
+          shards build silth --release --no-debug
+          otool -L bin/silth
+          bin/silth version | grep -q "Silth ${{ needs.check.outputs.version }}"
+      - name: Package
+        run: |
+          mkdir -p pkg dist && cp bin/silth LICENSE README.md CHANGELOG.md pkg/
+          tar -czf dist/silth-darwin-${{ matrix.arch }}.tar.gz -C pkg .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: silth-darwin-${{ matrix.arch }}
+          path: dist/*.tar.gz
+
+  publish:
+    name: publish the release
+    needs: [check, linux, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Checksums
+        run: |
+          mkdir dist && mv artifacts/silth-*/*.tar.gz dist/
+          (cd dist && sha256sum *.tar.gz > SHA256SUMS && cat SHA256SUMS)
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${{ needs.check.outputs.version }}"
+          prerelease=$([[ "$version" == *-* ]] && echo --prerelease || true)
+          gh release create "$GITHUB_REF_NAME" dist/* --title "Silth $version" --notes-file artifacts/notes/notes.md $prerelease
+
+  install:
+    name: install with ${{ matrix.os }}
+    needs: [check, publish]
+    strategy:
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - if: runner.os == 'macOS'
+        uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: ${{ env.CRYSTAL_VERSION }}
+      - name: scripts/install.sh
+        env:
+          SILTH_VERSION: ${{ needs.check.outputs.version }}
+          SILTH_INSTALL_DIR: ${{ runner.temp }}/silth
+        run: |
+          sh scripts/install.sh
+          "$SILTH_INSTALL_DIR/silth" version | grep -q "Silth $SILTH_VERSION"

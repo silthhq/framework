@@ -18,3 +18,4 @@ scripts/sync-skills                              # copy skills/silth into the ap
 3. Run specs on SQLite, and on PostgreSQL + MariaDB for anything touching `db/` or `orm/` (CI runs all of them plus MySQL 8).
 4. Templates in `src/silth/generators/templates/app` are embedded at compile time: rebuild `bin/silth` and try `bin/silth new /tmp/x --path-to-silth=$PWD`.
 5. Keep code readable: small methods, doc comments with examples, explicit names.
+6. A user-facing change gets a line in `CHANGELOG.md` (`[Unreleased]`); deprecate before removing (see the compatibility policy there).

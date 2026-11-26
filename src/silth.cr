@@ -23,6 +23,12 @@ require "digest/sha256"
 
 module Silth
   VERSION = "0.1.0"
+
+  # `MAJOR.MINOR` of `VERSION`: the release line (`0.1`) that documentation and
+  # Docker image tags follow.
+  def self.release_line : String
+    VERSION.split(/[.\-+]/)[0, 2].join('.')
+  end
 end
 
 # Foundations
@@ -31,6 +37,7 @@ require "./silth/support/dotenv"
 require "./silth/support/crypto"
 require "./silth/support/fake"
 require "./silth/errors"
+require "./silth/support/deprecation"
 require "./silth/config"
 require "./silth/logging"
 require "./silth/instrument"

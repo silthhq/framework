@@ -39,6 +39,15 @@ bin/silth new /tmp/demo --path-to-silth=$PWD              # end-to-end check of 
 
 After editing `templates/app` or `skills/silth`, run `scripts/sync-skills` (copies the skill into the template) and rebuild `bin/silth` (templates are embedded at compile time).
 
+## Releasing
+
+1. Move the `[Unreleased]` entries of `CHANGELOG.md` under `## [X.Y.Z]`, bump `version:` in `shard.yml` and `Silth::VERSION` (`spec/release_spec.cr` checks they agree).
+2. Merge, then `git tag -a vX.Y.Z -m "Silth X.Y.Z" && git push origin vX.Y.Z`.
+3. `.github/workflows/release.yml` builds the CLI (Linux static amd64/arm64, macOS), publishes it with `SHA256SUMS` and checks `scripts/install.sh` against it; `docker-images.yml` tags the images `X.Y.Z`, `X.Y` and `latest` (`edge` follows `main`).
+4. Freeze the docs in silthhq/website: `bin/cli docs:release X.Y` copies `docs/` to `versions/X.Y/`.
+
+Deprecations last one minor version: `@[Deprecated("…")]` on methods, `Silth.deprecated(...)` for config keys and behaviors.
+
 ## Rules
 
 - **Zero third-party shards.** Only Crystal's stdlib and system C libraries (libsqlite3, OpenSSL).
