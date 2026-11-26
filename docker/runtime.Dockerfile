@@ -2,8 +2,8 @@
 # Silth app (CA certificates, time zones, an unprivileged `app` user, a health
 # check on GET /up).
 #
-#   docker build -f docker/runtime.Dockerfile -t ghcr.io/silthhq/runtime:3.20 docker
-ARG ALPINE_VERSION=3.20
+#   docker build -f docker/runtime.Dockerfile -t ghcr.io/silthhq/runtime:dev docker
+ARG ALPINE_VERSION=3.24
 FROM alpine:${ALPINE_VERSION}
 
 RUN apk add --no-cache ca-certificates tzdata \

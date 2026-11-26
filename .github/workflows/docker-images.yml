@@ -1,5 +1,6 @@
 # Official images (docker/): checked on every pull request by building a fresh
-# app on them and probing GET /up; published to GHCR from main and v* tags.
+# app on them and probing GET /up; published to GHCR from main (`edge`) and from
+# release tags (`0.1.0`, `0.1`, `latest` and the Crystal or Alpine version).
 name: Docker images
 
 on:
@@ -16,7 +17,7 @@ permissions:
 
 env:
   CRYSTAL_VERSION: "1.22"
-  ALPINE_VERSION: "3.20"
+  ALPINE_VERSION: "3.24"
 
 jobs:
   app:
@@ -51,10 +52,10 @@ jobs:
         include:
           - image: builder
             context: .
-            version_tag: "1.22"
+            base_tag: "1.22"
           - image: runtime
             context: docker
-            version_tag: "3.20"
+            base_tag: "3.24"
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-qemu-action@v3
@@ -64,9 +65,21 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Image name
-        id: name
-        run: echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${{ matrix.image }}" >> "$GITHUB_OUTPUT"
+      - name: Tags
+        id: tags
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${{ matrix.image }}"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+            if [[ "$version" == *-* ]]; then # pre-release: its own tag only
+              tags="$image:$version"
+            else
+              tags="$image:$version,$image:${version%.*},$image:latest,$image:${{ matrix.base_tag }}"
+            fi
+          else
+            tags="$image:edge"
+          fi
+          echo "tags=$tags" >> "$GITHUB_OUTPUT"
       - uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.context }}
@@ -76,7 +89,4 @@ jobs:
             CRYSTAL_VERSION=${{ env.CRYSTAL_VERSION }}
             ALPINE_VERSION=${{ env.ALPINE_VERSION }}
           push: true
-          tags: |
-            ${{ steps.name.outputs.image }}:${{ matrix.version_tag }}
-            ${{ steps.name.outputs.image }}:latest
-            ${{ startsWith(github.ref, 'refs/tags/') && format('{0}:{1}', steps.name.outputs.image, github.ref_name) || '' }}
+          tags: ${{ steps.tags.outputs.tags }}

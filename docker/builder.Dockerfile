@@ -1,7 +1,7 @@
 # Official Silth build image: Crystal (Alpine, static linking) with the libraries
 # Silth apps link against, plus the `silth` CLI.
 #
-#   docker build -f docker/builder.Dockerfile -t ghcr.io/silthhq/builder:1.22 .
+#   docker build -f docker/builder.Dockerfile -t ghcr.io/silthhq/builder:dev .
 #
 # Used as the first stage of the Dockerfile `silth new` generates.
 ARG CRYSTAL_VERSION=1.22

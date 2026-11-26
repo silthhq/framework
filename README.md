@@ -31,21 +31,23 @@ Routing · middleware · controllers · ECR templates with auto-escaping · comp
 ## Quick start
 
 ```bash
-brew install crystal                 # or https://crystal-lang.org/install
-git clone https://github.com/silthhq/framework.git && cd framework
-shards build silth --release && cp bin/silth /usr/local/bin/
+brew install crystal                             # or https://crystal-lang.org/install
+curl -fsSL https://silth.dev/install.sh | sh     # the silth CLI (Linux, macOS), checksum verified
 silth new blog && cd blog && shards install
 silth g scaffold Post title:string 'body:text?'
-silth db:migrate && silth serve      # http://localhost:3000 · profiler: /_silth/profiler
+silth db:migrate && silth serve                  # http://localhost:3000 · profiler: /_silth/profiler
 ```
 
-Applications depend on the shard:
+Applications depend on a release line of the shard (`silth new --edge` follows `main` instead):
 
 ```yaml
 dependencies:
   silth:
     github: silthhq/framework
+    version: ~> 0.1.0
 ```
+
+Releases follow semantic versioning, deprecations are kept one minor version: see the [changelog and compatibility policy](CHANGELOG.md). To build the CLI from source: `shards build silth --release && cp bin/silth /usr/local/bin/`.
 
 ## This repository
 
@@ -55,6 +57,8 @@ dependencies:
 | [`spec/`](spec) | framework specs |
 | [`skills/`](skills) | agent skills: `silth` (building apps, shipped in every new app) and `silth-framework` (contributing) |
 | [`docker/`](docker) | official Docker images (`ghcr.io/silthhq/builder`, `ghcr.io/silthhq/runtime`) |
+| [`scripts/`](scripts) | `install.sh` (served at silth.dev/install.sh), `sync-skills` |
+| [`CHANGELOG.md`](CHANGELOG.md) | releases and the compatibility policy |
 | [`docker-compose.yml`](docker-compose.yml) | PostgreSQL + pgvector, MariaDB, MySQL 8.4, Redis, Mailpit, MinIO, Jaeger for development |
 
 The documentation lives with the website in [silthhq/website](https://github.com/silthhq/website) (`docs/`).
