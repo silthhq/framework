@@ -4,6 +4,7 @@ require "digest/sha1"
 require "digest/sha256"
 require "./mysql/codec"
 require "./mysql/rsa"
+require "./mysql/ed25519"
 
 module Silth::DB::MySQL
   # Native MySQL / MariaDB driver (client/server protocol 4.1).
@@ -16,7 +17,8 @@ module Silth::DB::MySQL
   # Auth plugins: `mysql_native_password`, `caching_sha2_password` and
   # `sha256_password` (full authentication over TLS, or with the password encrypted
   # with the server's RSA public key on plain TCP), `mysql_clear_password` (TLS
-  # only) and auth switch. MariaDB's `ed25519` and `parsec` are not supported yet.
+  # only), MariaDB's `ed25519` and `parsec` (Ed25519 signatures of the server's
+  # nonce, see `Ed25519`) and auth switch.
   #
   # ```text
   # mysql://user:pass@host:3306/app?ssl=true                        # TLS
@@ -54,6 +56,10 @@ module Silth::DB::MySQL
     PERFORM_FULL_AUTHENTICATION = 4_u8
     CACHING_SHA2_REQUEST_KEY    = 2_u8
     SHA256_REQUEST_KEY          = 1_u8
+
+    # MariaDB `parsec`: PBKDF2 rounds are 1024 << factor; a larger factor is refused
+    # rather than letting a server make the client spin.
+    PARSEC_MAX_FACTOR = 10
 
     # Server errors handled by the prepared statement path
     ER_UNSUPPORTED_PS                  = "1295"
@@ -234,18 +240,38 @@ module Silth::DB::MySQL
           io = IO::Memory.new(packet[1..])
           plugin = io.gets('\0', chomp: true) || "mysql_native_password"
           rest = io.gets_to_end.to_slice
-          scramble = rest.size >= 20 ? rest[0, 20] : rest
+          scramble = switch_scramble(plugin, rest)
           write_packet(auth_response(plugin, password, scramble))
         when 0x01 # AuthMoreData
-          auth_more_data(plugin, packet[1..], password, scramble)
+          if plugin == "parsec"
+            write_packet(parsec_signature(packet[1..], password, scramble))
+          else
+            auth_more_data(plugin, packet[1..], password, scramble)
+          end
         else
-          raise ConnectionError.new("Unexpected MySQL auth packet 0x#{packet[0].to_s(16)}")
+          # MariaDB sends plugin data as is unless its first byte could be read as
+          # a status (then it is prefixed with 0x01): parsec's salt starts with 'P'.
+          raise ConnectionError.new("Unexpected MySQL auth packet 0x#{packet[0].to_s(16)}") unless plugin == "parsec"
+          write_packet(parsec_signature(packet, password, scramble))
         end
       end
     end
 
+    # The nonce an AuthSwitchRequest carries: 32 bytes for MariaDB's Ed25519
+    # plugins (any byte, NUL included), a 20-byte scramble otherwise.
+    private def switch_scramble(plugin : String, data : Bytes) : Bytes
+      size = plugin.in?("client_ed25519", "parsec") ? 32 : 20
+      data.size >= size ? data[0, size] : data
+    end
+
     # First answer to the server for *plugin*.
     private def auth_response(plugin : String, password : String, scramble : Bytes) : Bytes
+      case plugin
+      when "client_ed25519" # an empty password is signed too
+        return scramble.size == 32 ? Ed25519.sign(scramble, password.to_slice) : Bytes.new(0)
+      when "parsec" # an empty packet asks for the salt
+        return Bytes.new(0)
+      end
       return Bytes.new(0) if password.empty?
       case plugin
       when "caching_sha2_password"
@@ -269,12 +295,32 @@ module Silth::DB::MySQL
         s3 = digest_sha1(joined)
         Bytes.new(s1.size) { |i| s1[i] ^ s3[i] }
       else
-        # MariaDB `client_ed25519`, `parsec`, GSSAPI…: fail clearly instead of
-        # answering with a native hash the server can only reject.
+        # GSSAPI, PAM dialog…: fail clearly instead of answering with a native hash
+        # the server can only reject.
         raise ConnectionError.new("MySQL authentication plugin #{plugin} is not supported " \
-                                  "(supported: mysql_native_password, caching_sha2_password, sha256_password, mysql_clear_password). " \
-                                  "See https://silth.dev/docs/database/mysql#authentication")
+                                  "(supported: mysql_native_password, caching_sha2_password, sha256_password, mysql_clear_password, " \
+                                  "client_ed25519, parsec). See https://silth.dev/docs/database/mysql#authentication")
       end
+    end
+
+    # MariaDB `parsec`, once the server sent its salt (`'P'`, an iteration factor,
+    # the salt): the key is PBKDF2-HMAC-SHA512(password, salt, 1024 << factor); the
+    # answer is a client nonce and the Ed25519 signature of both nonces.
+    private def parsec_signature(salt_packet : Bytes, password : String, server_nonce : Bytes) : Bytes
+      unless salt_packet.size > 2 && salt_packet[0] == 'P'.ord && server_nonce.size == 32
+        raise ConnectionError.new("MySQL parsec authentication: unexpected salt from the server")
+      end
+      factor = salt_packet[1]
+      raise ConnectionError.new("MySQL parsec authentication: iteration factor #{factor} is too large") if factor > PARSEC_MAX_FACTOR
+      key = OpenSSL::PKCS5.pbkdf2_hmac(password, salt_packet[2..], 1024 << factor, OpenSSL::Algorithm::SHA512, 32)
+      client_nonce = Random::Secure.random_bytes(32)
+      message = Bytes.new(64)
+      server_nonce.copy_to(message)
+      client_nonce.copy_to(message + 32)
+      answer = Bytes.new(96)
+      client_nonce.copy_to(answer)
+      Ed25519.sign(message, key).copy_to(answer + 32)
+      answer
     end
 
     # `mysql_clear_password` (LDAP/PAM accounts) sends the password as is: only over

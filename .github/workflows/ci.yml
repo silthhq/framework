@@ -24,6 +24,7 @@ jobs:
             url: postgres://silth:silth@127.0.0.1:5432/silth_test
           - database: mariadb
             url: mysql://silth:silth@127.0.0.1:3306/silth_test
+            admin_url: mysql://root:silth@127.0.0.1:3306/silth_test
           - database: mysql
             url: mysql://silth:silth@127.0.0.1:3307/silth_test
             admin_url: mysql://root:silth@127.0.0.1:3307/silth_test
