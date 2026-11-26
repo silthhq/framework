@@ -256,39 +256,64 @@ module Silth
       end
 
       # Runs the block inside a transaction. Nested calls use savepoints.
+      #
+      # The transaction commits when the block finishes, including with `return`
+      # or `break`, and rolls back when it raises (the exception is re-raised).
       def transaction(&)
         txs = (Fiber.current.silth_db_tx ||= {} of String => Connection)
         if conn = txs[@name]?
-          depth = (@savepoint_depth[conn.object_id]? || 0) + 1
-          @savepoint_depth[conn.object_id] = depth
-          sp = "silth_sp_#{depth}"
-          conn.query("SAVEPOINT #{sp}", [] of Value)
-          begin
-            result = yield
-            conn.query("RELEASE SAVEPOINT #{sp}", [] of Value)
-            return result
-          rescue ex
-            conn.query("ROLLBACK TO SAVEPOINT #{sp}", [] of Value) unless conn.closed?
-            raise ex
-          ensure
-            @savepoint_depth[conn.object_id] = depth - 1
-          end
+          return savepoint(conn) { yield }
         end
         conn = @pool.checkout
         txs[@name] = conn
+        done = false
         begin
           conn.query(@dialect.begin_sql, [] of Value)
           result = yield
-          conn.query("COMMIT", [] of Value)
-          after_commit_callbacks.each &.call
+          done = true
+          commit(conn)
           result
         rescue ex
-          conn.query("ROLLBACK", [] of Value) unless conn.closed? rescue nil
+          unless done
+            done = true
+            conn.query("ROLLBACK", [] of Value) unless conn.closed? rescue nil
+          end
           raise ex
         ensure
+          commit(conn) unless done # `return` or `break` from the block
           txs.delete(@name)
           after_commit_callbacks.clear
           @pool.release(conn)
+        end
+      end
+
+      private def commit(conn : Connection) : Nil
+        conn.query("COMMIT", [] of Value)
+        after_commit_callbacks.each &.call
+      end
+
+      private def savepoint(conn : Connection, &)
+        depth = (@savepoint_depth[conn.object_id]? || 0) + 1
+        @savepoint_depth[conn.object_id] = depth
+        sp = "silth_sp_#{depth}"
+        conn.query("SAVEPOINT #{sp}", [] of Value)
+        done = false
+        begin
+          result = yield
+          done = true
+          conn.query("RELEASE SAVEPOINT #{sp}", [] of Value)
+          result
+        rescue ex
+          unless done
+            done = true
+            # Keep the original error: the savepoint may be gone already (on MySQL,
+            # DDL commits the transaction and its savepoints).
+            conn.query("ROLLBACK TO SAVEPOINT #{sp}", [] of Value) unless conn.closed? rescue nil
+          end
+          raise ex
+        ensure
+          conn.query("RELEASE SAVEPOINT #{sp}", [] of Value) unless done # `return` or `break` from the block
+          @savepoint_depth[conn.object_id] = depth - 1
         end
       end
 

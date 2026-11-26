@@ -176,9 +176,7 @@ module Silth
       # Creates the table when missing (no DDL otherwise: MySQL would commit the
       # caller's transaction).
       def ensure_table(database : DB::Database = DB.connection(@connection)) : Nil
-        @ready = true if database.table_exists?(TABLE)
-        return if @ready
-        DB::Schema.new(database).create_table(TABLE, if_not_exists: true) do |t|
+        DB::Schema.new(database).ensure_table(TABLE) do |t|
           t.string :id, null: false, limit: 36
           t.string :name, null: false
           t.integer :total_jobs, null: false

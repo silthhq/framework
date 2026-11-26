@@ -124,9 +124,13 @@ describe Silth::DB::SchemaDumper do
   it "reloads to the same schema" do
     before = SchemaSpec.dump
     migrations = Silth::Migrator.new.migrations_for_db
-    Silth::DB::SchemaDefinition.new(SchemaSpec.version, nil) { |s| migrations.each(&.new(s).up) }.load(Silth::DB.connection)
-    SchemaSpec.dump.should eq(before)
-    Silth::Migrator.new.pending.should be_empty
+    begin
+      Silth::DB::SchemaDefinition.new(SchemaSpec.version, nil) { |s| migrations.each(&.new(s).up) }.load(Silth::DB.connection)
+      SchemaSpec.dump.should eq(before)
+      Silth::Migrator.new.pending.should be_empty
+    ensure # loading drops every table, which MySQL commits
+      Silth::Testing.prepare_internal_tables
+    end
   end
 
   it "loads the code it generates and dumps it back unchanged" do
@@ -136,7 +140,10 @@ describe Silth::DB::SchemaDumper do
       definition.load(Silth::DB.connection)
       SchemaSpec.dump.should eq(text)
     ensure # MySQL commits DDL: put the spec schema back
-      Silth::Migrator.new.fresh if dialect == "mysql"
+      if dialect == "mysql"
+        Silth::Migrator.new.fresh
+        Silth::Testing.prepare_internal_tables
+      end
     end
   end
 end

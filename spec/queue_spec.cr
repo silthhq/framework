@@ -87,9 +87,6 @@ class MailRateJob < Silth::Job
   end
 end
 
-# The batch table is created once, outside the per-example transactions.
-Silth::Batch::DatabaseStore.new.ensure_table
-
 describe "unique jobs" do
   it "skips duplicates until the first one has run" do
     QueueSpec.with_memory_queue do |worker|

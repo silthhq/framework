@@ -256,12 +256,14 @@ module Silth
       end
 
       def db : DB::Database
-        d = DB.connection(@connection)
-        unless @ready
-          Queue.ensure_tables(d)
-          @ready = true
-        end
-        d
+        prepare unless @ready
+        DB.connection(@connection)
+      end
+
+      # Creates the queue tables now when they are missing.
+      def prepare : Nil
+        Queue.ensure_tables(DB.connection(@connection))
+        @ready = true
       end
 
       def push(envelope : Envelope) : Nil

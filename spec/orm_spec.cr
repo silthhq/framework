@@ -1,5 +1,38 @@
 require "./spec_helper"
 
+module TransactionSpec
+  def self.insert_and_return(db : Silth::DB::Database, value : Int32) : Int32
+    db.transaction do
+      db.exec("INSERT INTO tx_items (v) VALUES (?)", [value])
+      return value # leaves the block early: the transaction still commits
+    end
+    0
+  end
+end
+
+describe "Silth::DB transactions" do
+  it "commits when the block returns early, at the top level and in a savepoint" do
+    db = Silth::DB::Database.new("tx_spec", "sqlite3::memory:", 1)
+    db.exec_script("CREATE TABLE tx_items (v INTEGER)")
+    TransactionSpec.insert_and_return(db, 1).should eq(1)
+    db.in_transaction?.should be_false
+    db.transaction { TransactionSpec.insert_and_return(db, 2) } # a savepoint released on return
+    db.transaction { db.exec("INSERT INTO tx_items (v) VALUES (3)") }
+    db.query("SELECT v FROM tx_items ORDER BY v").rows.map(&.first).should eq([1, 2, 3])
+  ensure
+    db.try &.close
+  end
+
+  it "re-raises the block's error even when the savepoint is gone" do
+    expect_raises(Exception, "boom") do
+      Silth::DB.transaction do
+        Silth::DB.connection.with_connection { |conn| conn.query("RELEASE SAVEPOINT silth_sp_1", [] of Silth::DB::Value) }
+        raise "boom"
+      end
+    end
+  end
+end
+
 describe Silth::Model do
   it "creates, validates and finds records" do
     note = Note.create!(title: "First", views: 3)

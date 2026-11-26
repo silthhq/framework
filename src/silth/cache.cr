@@ -217,17 +217,19 @@ module Silth
       super(name)
     end
 
-    private def db : DB::Database
-      d = DB.connection(@connection)
-      unless @ready
-        DB::Schema.new(d).create_table(TABLE, if_not_exists: true) do |t|
-          t.string :key, null: false, unique: true
-          t.text :value
-          t.bigint :expires_at
-        end
-        @ready = true
+    # Creates the table now when it is missing.
+    def prepare : Nil
+      DB::Schema.new(DB.connection(@connection)).ensure_table(TABLE) do |t|
+        t.string :key, null: false, unique: true
+        t.text :value
+        t.bigint :expires_at
       end
-      d
+      @ready = true
+    end
+
+    private def db : DB::Database
+      prepare unless @ready
+      DB.connection(@connection)
     end
 
     def read(key : String) : String?
