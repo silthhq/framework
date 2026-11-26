@@ -25,35 +25,35 @@ Iterations shipped after the first release of the stage:
 - [x] Identity: a new mark (a mask with two hollow eyes), flat theme without gradients or glows for the internal pages, the app template and the website
 - [x] MariaDB `ed25519` / `parsec` accounts: a clear error naming the plugin and a documented workaround (`mysql_native_password`), support planned below
 
-## Stage 1.x: next iterations
+## Stage 1.x: next iterations ✅
 
-Proposed order. Each item ships with specs, the cheat sheet and the docs page, like before.
+Each item shipped with specs, the cheat sheet and the docs page.
 
 ### 1. First release
 
-- [ ] Check the new CI on GitHub with Crystal 1.22 and fix what the local harness (Crystal 1.11 + shims) could not catch
-- [ ] Tag `v0.1.0`: `CHANGELOG.md`, compatibility policy (semver, deprecations kept one minor version), images tagged by version
-- [ ] Release workflow on tags: prebuilt `silth` CLI binaries (Linux `amd64`/`arm64`, macOS), checksums, install script on silth.dev
-- [ ] Versioned documentation on the website (`/docs/0.1/…`), the latest version by default
+- [x] Check the CI with Crystal 1.22: green on GitHub; a local run on Crystal 1.22 with SQLite, PostgreSQL 16, MariaDB 10.11 and 11.8 and MySQL 8.4 found two bugs, fixed (a `return` inside `DB#transaction` left the transaction open; the lazy `CREATE TABLE` of the batch store committed the specs' transactions on MySQL)
+- [x] `v0.1.0` prepared: `CHANGELOG.md` with the compatibility policy (semver, deprecations kept one minor version, `Silth.deprecated` and `SILTH_DEPRECATIONS=raise`), images tagged `X.Y.Z`, `X.Y`, `latest` (and `edge` from `main`), new apps on the CLI's release line (`~> 0.1.0`, `--edge` for `main`). The tag itself is pushed by hand after the merge
+- [x] Release workflow on tags (`.github/workflows/release.yml`): checks the version everywhere, static Linux `x86_64`/`aarch64` and macOS `arm64`/`x86_64` CLI binaries, `SHA256SUMS`, GitHub release from the changelog, then installs it with `scripts/install.sh`, served at silth.dev/install.sh
+- [x] Versioned documentation on the website: `docs/` follows `main` (`/docs/edge`), `versions/X.Y/` are frozen by `bin/cli docs:release X.Y`, the newest release is served at `/docs`
 
 ### 2. Database
 
-- [ ] MariaDB `ed25519` authentication. Needs an in-house Ed25519 signature: MariaDB derives the key from `SHA-512(password)` instead of a 32-byte seed, so OpenSSL's EVP API cannot be used as is. `parsec` after that.
-- [ ] Read replicas: `replicas:` per connection, reads routed to a replica, writes and transactions to the primary, sticky reads after a write in the same request
-- [ ] Query log in the profiler linked to the line of application code that ran each query (N+1 hunting)
-- [ ] `silth db:console` (psql, mysql or sqlite3 with the configured URL)
+- [x] MariaDB `ed25519` authentication with an in-house Ed25519 (RFC 8032 vectors, checked against OpenSSL and real MariaDB accounts), then `parsec` (PBKDF2 key, MariaDB 11.6+)
+- [x] Read replicas: `replicas:` per connection, reads routed to the replicas in turn, writes and transactions to the primary, sticky reads after a write in the same request or job, and for `sticky_for` seconds through a cookie; an unreachable replica is rested
+- [x] Query log linked to the line of application code that ran each query; repeats from one line reported as possible N+1
+- [x] `silth db:console`: password through the environment, `--connection`, `--replica`, `--print`
 
 ### 3. Profiler and developer experience
 
-- [ ] Sub-requests in the toolbar: fetch/XHR calls and live component actions of the page, each with its own profile (like Symfony's AJAX panel)
-- [ ] Editor links: file:line in the debug page, the timeline and the queries panel open in VS Code, Zed or a custom URL (`profiler.editor`)
-- [ ] Optional persistence of profiles (SQLite file under `tmp/`) so they survive a rebuild in `silth serve`
-- [ ] Performance budget per route (`profiler.budget_ms`), flagged in the toolbar and in test output
+- [x] Sub-requests in the toolbar: fetch/XHR calls and live component actions, each with its own profile
+- [x] Editor links: file:line in the debug page, the timeline, the queries and exceptions panels open in VS Code, Cursor, Zed, JetBrains IDEs… or a URL template (`profiler.editor`)
+- [x] Optional persistence of profiles (`tmp/profiler.sqlite3`) so they survive a rebuild in `silth serve`
+- [x] Performance budget per route or handler (`profiler.budget_ms`, `profiler.budgets`), flagged in the toolbar, the dashboard and the test output
 
 ### 4. Front end
 
-- [ ] Component previews page in the dashboard (props and slots declared in a new `Silth::ComponentPreview`, like mail previews), the base for a future UI kit
-- [ ] A small set of accessible, unstyled-by-default components shipped with the template (dialog, dropdown, tabs, toast) on top of live components
+- [x] Component previews page in the dashboard (`Silth::ComponentPreview`, like mail previews): widths, editable props, slots, usage snippet; the base for a future UI kit
+- [x] Accessible, unstyled-by-default components shipped with the template (`UI::Dialog`, `UI::Dropdown`, `UI::Tabs`, `UI::Toast`) working with live components, with previews
 
 ## Stage 2: ecosystem
 
