@@ -2,6 +2,9 @@ enabled: false
 toolbar: true
 keep: 200
 slow_query_ms: 100
+query_sources: true                # the line of your code behind each query (N+1 hunting)
+editor: ${SILTH_EDITOR:-vscode}    # file:line links: vscode, cursor, zed, idea, sublime, none, or a URL template
+# editor_root: /home/me/my_app     # the app's path on your machine when it runs in Docker
 
 when@development:
   enabled: true
