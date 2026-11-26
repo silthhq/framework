@@ -117,3 +117,78 @@ describe Silth::Profiler do
     Silth::Profiler.clear
   end
 end
+
+module ProfilerSpec
+  # Records the instrumentation of the current fiber into its profile, as in development.
+  class_getter subscribed : Bool = begin
+    Silth::Profiler.enabled = true
+    Silth::Profiler.boot
+    true
+  end
+
+  def self.with_config(yaml : String, &)
+    previous = Silth.config
+    Silth.config = Silth::Config.new(YAML.parse(yaml))
+    begin
+      yield
+    ensure
+      Silth.config = previous
+    end
+  end
+end
+
+describe "Profiler query sources" do
+  it "finds the first frame of application code" do
+    frames = ["src/silth/db.cr:250:13 in 'query'", "lib/silth/src/silth/orm/query.cr:40:5 in 'to_a'",
+              "/usr/share/crystal/src/array.cr:10:3 in 'each'", "#{Dir.current}/src/views/posts/index.html.ecr:8:3 in 'to_s'",
+              "src/controllers/posts_controller.cr:12:5 in 'index'"]
+    source = Silth::Profiler.app_source(frames).not_nil!
+    {source.file, source.line, source.method}.should eq({"src/views/posts/index.html.ecr", 8, "to_s"})
+    Silth::Profiler.app_source(["src/silth/db.cr:1:1 in 'x'", "?? in '??'"]).should be_nil
+  end
+
+  it "ties each query to the line that ran it and groups the repeats (N+1)" do
+    ProfilerSpec.subscribed.should be_true
+    p = Silth::Profiler::Profile.new
+    p.method, p.url, p.status = "GET", "/notes", 200
+    Fiber.current.silth_profile = p
+    line = __LINE__ + 1
+    3.times { |i| Note.where(title: "n+1 #{i}").to_a }
+    Note.count
+    Fiber.current.silth_profile = nil
+    p.queries.size.should eq(4)
+    p.queries.first.source.not_nil!.to_s.should eq("spec/profiler_spec.cr:#{line}")
+    repeat = p.repeated_queries.first
+    {repeat.count, repeat.source.try(&.line)}.should eq({3, line})
+    p.spans.find(&.kind.==("db")).not_nil!.source.should eq(p.queries.first.source)
+
+    Silth::Profiler.store(p)
+    ctx, io = ProfilerSpec.context("/_silth/profiler/#{p.token}?panel=queries")
+    Silth::Profiler::Dashboard.serve(ctx)
+    ctx.response.close
+    io.to_s.should contain("spec/profiler_spec.cr:#{line}")
+    io.to_s.should contain("from ")
+  ensure
+    Fiber.current.silth_profile = nil
+    Silth::Profiler.clear
+  end
+end
+
+describe Silth::Profiler::Editor do
+  it "links file:line to the configured editor" do
+    ProfilerSpec.with_config("profiler:\n  editor: vscode") do
+      Silth::Profiler::Editor.url("src/app.cr", 3).should eq("vscode://file#{Dir.current}/src/app.cr:3")
+      Silth::Profiler::Editor.link("src/app.cr", 3).should contain(%(<a class="s-src" href="vscode://file#{Dir.current}/src/app.cr:3"))
+    end
+    ProfilerSpec.with_config("profiler:\n  editor: zed\n  editor_root: /home/me/blog") do
+      Silth::Profiler::Editor.url("#{Dir.current}/src/my app.cr", 7).should eq("zed://file/home/me/blog/src/my%20app.cr:7")
+    end
+    ProfilerSpec.with_config("profiler:\n  editor: \"x-ide://open?f={file}&l={line}\"") do
+      Silth::Profiler::Editor.url("/abs/file.cr", 9).should eq("x-ide://open?f=/abs/file.cr&l=9")
+    end
+    ProfilerSpec.with_config("profiler:\n  editor: none") do
+      Silth::Profiler::Editor.url("src/app.cr", 3).should be_nil
+      Silth::Profiler::Editor.link("src/app.cr", 3).should eq(%(<code class="s-src">src/app.cr:3</code>))
+    end
+  end
+end

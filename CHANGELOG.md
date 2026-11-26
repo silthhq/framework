@@ -36,6 +36,11 @@ The first release.
 - Read replicas: `replicas:` per connection; reads go to the replicas in turn, writes and transactions to the primary, reads after a write stay on the primary for the rest of the request or job and, through a cookie, for `sticky_for` seconds; `DB.on_primary { }`; an unreachable replica is skipped for 10 seconds.
 - MariaDB `ed25519` and `parsec` (11.6+) authentication, with an in-house Ed25519 signature: `ed25519` derives its key from SHA-512 of the password, which OpenSSL's EVP API cannot take.
 
+### Profiler and developer experience
+
+- Each query is traced back to the line of application code that ran it (queries panel, timeline, toolbar); the same statement from the same line several times is reported as a possible N+1 with that line. `profiler.query_sources` turns it off.
+- Editor links: `file:line` in the debug page, the timeline, the queries and exceptions panels open in VS Code, Cursor, Zed, JetBrains IDEs, Sublime Text… or a URL template (`profiler.editor`, `SILTH_EDITOR`, `profiler.editor_root` for containers).
+
 ### Fixed before the release
 
 - `DB#transaction` commits when the block returns early (`return`, `break`); it used to hand the connection back to the pool with the transaction still open.

@@ -110,7 +110,8 @@ module Silth
         frames.each_with_index do |frame, i|
           is_app = app_frame?(frame, app_root)
           if m = FRAME.match(frame)
-            io << %(<div class="s-frame#{is_app ? " app" : ""}"><div class="loc">) << HTML.escape(relative(m["file"], app_root)) << ':' << m["line"] << %(</div><div class="fn">) << HTML.escape(m["fn"]) << "</div>"
+            loc = is_app ? Profiler::Editor.link(m["file"], m["line"].to_i, "#{relative(m["file"], app_root)}:#{m["line"]}") : HTML.escape("#{relative(m["file"], app_root)}:#{m["line"]}")
+            io << %(<div class="s-frame#{is_app ? " app" : ""}"><div class="loc">) << loc << %(</div><div class="fn">) << HTML.escape(m["fn"]) << "</div>"
             io << source_excerpt(frame) if is_app && i != first_app && i < 12
             io << "</div>"
           else

@@ -74,7 +74,9 @@ module Silth
         width = s.instant ? 0.0 : ((row.end_ms - s.start_ms) / total * 100).clamp(0.25, 100.0 - left)
         title = s.detail.empty? ? s.label : "#{s.label}\n#{s.detail}"
         io << %(<div class="s-tl-row k-#{s.kind}#{level}" title="#{HTML.escape(title[0, 600])}">)
-        io << %(<div class="s-tl-label" style="padding-left:#{10 + {row.depth, 6}.min * 14}px"><span class="s-tl-kind">#{kind_label(s)}</span><span class="t">#{HTML.escape(s.label[0, 160])}</span></div>)
+        io << %(<div class="s-tl-label" style="padding-left:#{10 + {row.depth, 6}.min * 14}px"><span class="s-tl-kind">#{kind_label(s)}</span><span class="t">#{HTML.escape(s.label[0, 160])}</span>)
+        s.source.try { |src| io << Editor.link(src.file, src.line, "#{File.basename(src.file)}:#{src.line}", "s-tl-src") }
+        io << "</div>"
         io << %(<div class="s-tl-track"><i class="s-tl-bar#{s.instant ? " tick" : ""}" style="left:#{left.round(3)}%;)
         io << %(width:#{width.round(3)}%) unless s.instant
         io << %("></i></div>)

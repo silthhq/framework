@@ -139,25 +139,29 @@ module Silth
       private def self.queries_panel(p : Profile) : String
         return empty("No query during this request.") if p.queries.empty?
         slow = Profiler.slow_query_ms
-        groups = p.queries.group_by(&.sql).select { |_, v| v.size > 1 }
-        dupes = groups.map do |sql, list|
-          %(<tr><td class="num"><span class="s-badge warn">×#{list.size}</span></td><td><div class="s-sql">#{highlight_sql(sql)}</div></td><td class="num">#{Timeline.format_ms(list.sum(&.ms))} ms</td></tr>)
+        repeats = p.repeated_queries
+        repeated = repeats.map { |r| {r.sql, r.source} }.to_set
+        dupes = repeats.map do |r|
+          from = r.source ? %(<div class="s-from">from #{Editor.link(r.source.not_nil!)}</div>) : ""
+          %(<tr><td class="num"><span class="s-badge warn">×#{r.count}</span></td><td><div class="s-sql">#{highlight_sql(r.sql)}</div>#{from}</td><td class="num">#{Timeline.format_ms(r.ms)} ms</td></tr>)
         end.join
         rows = p.queries.map_with_index do |q, i|
           flags = String.build do |io|
             io << %( <span class="s-badge warn">slow</span>) if q.ms > slow
-            io << %( <span class="s-badge info">duplicate</span>) if groups.has_key?(q.sql)
+            io << %( <span class="s-badge info">repeated</span>) if repeated.includes?({q.sql, q.source})
           end
           args = q.args.empty? ? "" : %(<div class="s-muted mono" style="margin-top:4px">[#{HTML.escape(q.args.join(", "))}]</div>)
-          %(<tr><td class="num s-muted">#{i + 1}</td><td class="num s-muted">+#{Timeline.format_ms(q.start_ms)}</td><td><div class="s-sql">#{highlight_sql(q.sql)}</div>#{args}</td><td class="num s-muted">#{q.rows}</td><td class="num">#{Timeline.format_ms(q.ms)} ms#{flags}</td></tr>)
+          source = q.source.try { |s| Editor.link(s) } || %(<span class="s-muted">-</span>)
+          %(<tr><td class="num s-muted">#{i + 1}</td><td class="num s-muted">+#{Timeline.format_ms(q.start_ms)}</td><td><div class="s-sql">#{highlight_sql(q.sql)}</div>#{args}</td><td class="s-src-cell">#{source}</td><td class="num s-muted">#{q.rows}</td><td class="num">#{Timeline.format_ms(q.ms)} ms#{flags}</td></tr>)
         end.join
         String.build do |io|
           io << %(<p class="s-sub">#{p.queries.size} queries in #{Timeline.format_ms(p.query_ms)} ms on #{p.queries.map(&.connection).uniq.join(", ")}.</p>)
-          unless groups.empty?
-            io << %(<div class="s-card"><h3 class="s-warn">Same statement run several times (possible N+1)</h3><table class="s-table"><tbody>#{dupes}</tbody></table>)
-            io << %(<p class="s-muted" style="margin:10px 0 0">Preload the association (<code>.includes(:author)</code>) or cache the result.</p></div>)
+          unless repeats.empty?
+            io << %(<div class="s-card"><h3 class="s-warn">Same statement from the same line, several times (possible N+1)</h3><table class="s-table"><tbody>#{dupes}</tbody></table>)
+            io << %(<p class="s-muted" style="margin:10px 0 0">A query inside a loop: preload the association (<code>.includes(:author)</code>), load the rows in one query, or cache the result.</p></div>)
           end
-          io << %(<div class="s-card" style="padding:0"><table class="s-table"><thead><tr><th class="num">#</th><th class="num">At</th><th>Statement</th><th class="num">Rows</th><th class="num">Time</th></tr></thead><tbody>#{rows}</tbody></table></div>)
+          io << %(<div class="s-card" style="padding:0"><table class="s-table"><thead><tr><th class="num">#</th><th class="num">At</th><th>Statement</th><th>Source</th><th class="num">Rows</th><th class="num">Time</th></tr></thead><tbody>#{rows}</tbody></table></div>)
+          io << %(<p class="s-muted">No source? Queries are traced back to your code from the backtrace, which needs a build with debug information (the default of <code>silth serve</code>). Set <code>profiler.query_sources: false</code> to turn it off.</p>) if p.queries.all? { |q| q.source.nil? }
         end
       end
 
@@ -216,7 +220,14 @@ module Silth
       private def self.exceptions_panel(p : Profile) : String
         return empty("No exception.") if p.exceptions.empty?
         p.exceptions.map do |e|
-          %(<div class="s-card"><div class="s-error-class">#{HTML.escape(e.name)}</div><p>#{HTML.escape(e.message)}</p><pre class="s-muted mono" style="margin:0;white-space:pre-wrap">#{HTML.escape(e.backtrace.join('\n'))}</pre></div>)
+          frames = e.backtrace.map do |frame|
+            if (m = DebugPage::FRAME.match(frame)) && DebugPage.app_frame?(frame, Dir.current)
+              %(<div class="s-frame app"><div class="loc">#{Editor.link(m["file"], m["line"].to_i)}</div><div class="fn">#{HTML.escape(m["fn"])}</div></div>)
+            else
+              %(<div class="s-frame"><div class="fn">#{HTML.escape(frame)}</div></div>)
+            end
+          end.join
+          %(<div class="s-card"><div class="s-error-class">#{HTML.escape(e.name)}</div><p>#{HTML.escape(e.message)}</p>#{frames}</div>)
         end.join
       end
 

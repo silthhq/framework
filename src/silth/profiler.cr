@@ -15,12 +15,25 @@ module Silth
   # toolbar: true
   # keep: 200                # profiles kept in memory
   # slow_query_ms: 100
+  # query_sources: true      # the line of app code behind each query (N+1 hunting)
   # ```
   module Profiler
     # Rows kept in a profile's timeline (queries, views, logs…).
     MAX_SPANS = 1000
 
-    record QueryEntry, sql : String, args : Array(String), ms : Float64, connection : String, rows : Int32, start_ms : Float64 = 0.0
+    # A line of application code: where a query came from.
+    record Source, file : String, line : Int32, method : String = "" do
+      def to_s(io : IO) : Nil
+        io << file << ':' << line
+      end
+    end
+
+    record QueryEntry, sql : String, args : Array(String), ms : Float64, connection : String, rows : Int32, start_ms : Float64 = 0.0,
+      source : Source? = nil
+
+    # The same statement run several times from the same line of code: the
+    # signature of an N+1 (a query inside a loop).
+    record Repeat, sql : String, source : Source?, count : Int32, ms : Float64
     record LogEntry, level : String, source : String, message : String, at : Time, offset_ms : Float64 = 0.0
     record Entry, kind : String, label : String, detail : String, at : Time, ms : Float64? = nil, offset_ms : Float64? = nil
     record ExceptionEntry, name : String, message : String, backtrace : Array(String), offset_ms : Float64
@@ -51,8 +64,9 @@ module Silth
       property duration_ms : Float64?
       property level : String?
       property instant : Bool
+      property source : Source?
 
-      def initialize(@kind, @label, @detail, @start_ms, @duration_ms = nil, @level = nil, @instant = false)
+      def initialize(@kind, @label, @detail, @start_ms, @duration_ms = nil, @level = nil, @instant = false, @source = nil)
       end
 
       def end_ms : Float64
@@ -142,6 +156,13 @@ module Silth
         @queries.group_by(&.sql).count { |_, v| v.size > 1 }
       end
 
+      # Statements run more than once from the same line, most repeated first.
+      def repeated_queries : Array(Repeat)
+        @queries.group_by { |q| {q.sql, q.source} }.compact_map do |(sql, source), list|
+          Repeat.new(sql, source, list.size, list.sum(&.ms)) if list.size > 1
+        end.sort_by { |r| {-r.count, -r.ms} }
+      end
+
       def slow_queries(threshold_ms : Number) : Int32
         @queries.count { |q| q.ms > threshold_ms }
       end
@@ -219,6 +240,38 @@ module Silth
       Silth.config.int("profiler.slow_query_ms", 100)
     end
 
+    @@query_sources : Bool? = nil
+
+    def self.query_sources? : Bool
+      @@query_sources = Silth.config.bool("profiler.query_sources", true) if @@query_sources.nil?
+      @@query_sources.not_nil!
+    end
+
+    def self.query_sources=(value : Bool) : Nil
+      @@query_sources = value
+    end
+
+    FRAME = /\A(?<file>\S+?\.e?cr):(?<line>\d+)(?::\d+)? in '(?<method>.*)'\z/
+
+    # The first frame of *frames* (a backtrace, `caller` by default) that belongs
+    # to the application: not the framework, a shard or Crystal's standard
+    # library. Needs debug information (development builds have it).
+    #
+    # ```
+    # Profiler.app_source(["lib/silth/src/silth/db.cr:250:13 in 'query'", "src/controllers/posts_controller.cr:12:5 in 'show'"])
+    # # => Source(file: "src/controllers/posts_controller.cr", line: 12, method: "show")
+    # ```
+    def self.app_source(frames : Array(String) = caller) : Source?
+      root = Dir.current + "/"
+      frames.each do |frame|
+        m = frame.match(FRAME) || next
+        file = m["file"].lchop(root)
+        next if file.starts_with?('/') || file.starts_with?("lib/") || file.starts_with?("src/silth/") || file == "src/silth.cr"
+        return Source.new(file, m["line"].to_i, m["method"])
+      end
+      nil
+    end
+
     private def self.record_background(entry : Entry) : Nil
       @@mutex.synchronize do
         @@background << entry
@@ -263,8 +316,9 @@ module Silth
       when Instrument::Query
         if p = profile
           ms = event.duration.total_milliseconds
-          p.queries << QueryEntry.new(event.sql, event.args, ms, event.connection, event.rows, {p.elapsed_ms - ms, 0.0}.max)
-          p.span("db", event.sql, "#{event.rows} rows · #{event.connection}", event.duration)
+          source = query_sources? ? app_source : nil
+          p.queries << QueryEntry.new(event.sql, event.args, ms, event.connection, event.rows, {p.elapsed_ms - ms, 0.0}.max, source)
+          p.span("db", event.sql, "#{event.rows} rows · #{event.connection}#{source ? " · #{source}" : ""}", event.duration).try &.source=(source)
         end
         return
       when Instrument::Action
@@ -357,6 +411,7 @@ module Silth
   end
 end
 
+require "./profiler/editor"
 require "./profiler/timeline"
 require "./profiler/toolbar"
 require "./profiler/mail_viewer"

@@ -75,7 +75,8 @@ module Silth
 
       private def self.db_item(io, p : Profile, base : String) : Nil
         slow_limit = Profiler.slow_query_ms
-        dupes = p.duplicated_queries
+        repeats = p.repeated_queries
+        dupes = repeats.size
         slow = p.slow_queries(slow_limit)
         state = slow > 0 || dupes > 0 || p.queries.size > 30 ? "warn" : ""
         item(io, "#{base}?panel=queries", state, "Database") do |label, pop|
@@ -87,6 +88,14 @@ module Silth
             "Duplicated" => dupes.zero? ? "none" : "#{dupes} statement(s), possible N+1",
             "Slow"       => slow.zero? ? "none above #{slow_limit} ms" : "#{slow} above #{slow_limit} ms",
           })
+          unless repeats.empty?
+            pop << %(<p class="stb-sub">Repeated (N+1?)</p><ul class="stb-list">)
+            repeats.first(3).each do |r|
+              where = r.source.try { |src| Editor.link(src.file, src.line, "#{File.basename(src.file)}:#{src.line}", "stb-src") } || ""
+              pop << %(<li><code class="warn">×#{r.count} #{HTML.escape(short(r.sql, 70))}</code>#{where}</li>)
+            end
+            pop << "</ul>"
+          end
           slowest = p.queries.sort_by { |q| -q.ms }.first(3)
           unless slowest.empty?
             pop << %(<p class="stb-sub">Slowest</p><ul class="stb-list">)
@@ -239,6 +248,8 @@ module Silth
         #silth-toolbar .stb-list li{display:flex;justify-content:space-between;gap:12px;margin:0;min-width:0}
         #silth-toolbar .stb-list code{flex:1;min-width:0;font:11.5px/1.4 "JetBrains Mono",ui-monospace,Menlo,monospace;color:#b9bdd0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
         #silth-toolbar .stb-list span{color:#868ba3;white-space:nowrap;font-size:11.5px}
+        #silth-toolbar .stb-list .stb-src{flex:none;max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#868ba3;font:11px/1.4 "JetBrains Mono",ui-monospace,Menlo,monospace;text-decoration:none}
+        #silth-toolbar .stb-list a.stb-src{color:#a6dcff}#silth-toolbar .stb-list a.stb-src:hover{text-decoration:underline}
         #silth-toolbar code.warn{color:#e3bb74}#silth-toolbar code.err{color:#ff6b81}
         #silth-toolbar .stb-more{display:inline-block;margin-top:10px;color:#a6dcff;text-decoration:none}
         #silth-toolbar .stb-more:hover,#silth-toolbar .stb-links a:hover{text-decoration:underline}

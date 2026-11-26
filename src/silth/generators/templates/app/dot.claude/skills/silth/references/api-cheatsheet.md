@@ -49,6 +49,7 @@ Workflows: `config/workflows.yml`, `Silth::Workflow.get("name").apply(model, "tr
 Billing: `include Silth::Billing::Billable`, `user.checkout(price, success_url:, cancel_url:)`, `user.subscribed?`.
 Telemetry: `Silth::Telemetry.trace("name") { |span| }`, `counter`, `histogram`.
 Instrumentation (profiler, telemetry): `Silth::Instrument.subscribe { |event| }`, `Instrument.measure("name") { }`, `Instrument.publish(Instrument::Custom.new("name", {"k" => "v"}))`; framework events: Query, Action, Render, Translation (found/fallback/missing), Cache, Mail, Job, AppEvent, HTTPCall, Notification.
+Profiler (`config/profiler.yml`): `/_silth/profiler`; each query shows the app line that ran it, repeats from one line = N+1 (fix with `.includes`); `editor: vscode|cursor|zed|idea|…` makes file:line links open in the editor (`SILTH_EDITOR`, `editor_root` in Docker).
 I18n: `config/locales/<locale>.yml`, `t("key", count: n, name: x)`, `l(time, "long")`.
 
 ## CLI
