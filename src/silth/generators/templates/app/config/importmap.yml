@@ -1,4 +1,5 @@
 # ES modules without a bundler. Values are asset paths (assets/…) or absolute URLs.
 imports:
   app: js/app.js
+  ui: js/ui.js
   silth: /_silth/silth.js

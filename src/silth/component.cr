@@ -33,6 +33,9 @@ module Silth
     annotation Prop
     end
 
+    # A declared prop, as component previews show it.
+    record PropSpec, name : String, type : String, nilable : Bool, writable : Bool, default : String, value : String, editable : Bool
+
     # Default slot as a block (set by the block form of `component`).
     property slot : (-> Nil)? = nil
     @__default_slot : String? = nil
@@ -138,6 +141,86 @@ module Silth
 
     # :nodoc: the default slot, rendered by the caller before the component.
     def default_slot_html=(@__default_slot : String?)
+    end
+
+    # Fills the slots with HTML, from code (previews, specs) rather than a
+    # template block: *content* is the default slot.
+    #
+    # ```
+    # CardComponent.new(title: "Stats").with_slots(content: "<p>42</p>", footer: %(<a href="/stats">All</a>))
+    # ```
+    def with_slots(content : String? = nil, **slots) : self
+      @__default_slot = content if content
+      slots.each { |name, html| fill_slot(name, html.to_s) }
+      self
+    end
+
+    # Fills the named slot *name* with *html*.
+    def fill_slot(name : Symbol | String, html : String) : Nil
+      @__slots[name.to_s] = -> { @view_io << html; nil }
+    end
+
+    # Names of the slots the caller filled ("content" for the default one).
+    def filled_slots : Array(String)
+      names = @__slots.keys
+      names.unshift("content") if slot?
+      names
+    end
+
+    # The template code component previews show for this instance; nil gives the
+    # generic one (props, then slots). Override it when the component is filled
+    # through methods of its own (`tabs.tab …`, `menu.item …`).
+    def preview_usage : String?
+      nil
+    end
+
+    # The props this component declares, with their current values.
+    def prop_specs : Array(PropSpec)
+      specs = [] of PropSpec
+      {% for ivar in @type.instance_vars %}
+        {% ann = ivar.annotation(::Silth::Component::Prop) %}
+        {% if ann %}
+          {% type_name = ann[:type].resolve.name.stringify %}
+          specs << PropSpec.new({{ivar.name.stringify}}, {{type_name}}, {{ann[:nilable]}}, {{ann[:writable]}},
+            ({{ivar.default_value}}).inspect, @{{ivar.name}}.inspect, {{%w(String Int32 Int64 Float32 Float64 Bool).includes?(type_name)}})
+        {% end %}
+      {% end %}
+      specs
+    end
+
+    # :nodoc: sets a scalar prop from a preview control (the text of a form field).
+    def assign_prop_text(name : String, text : String) : Bool
+      {% for ivar in @type.instance_vars %}
+        {% ann = ivar.annotation(::Silth::Component::Prop) %}
+        {% if ann %}
+          {% type_name = ann[:type].resolve.name.stringify %}
+          if name == {{ivar.name.stringify}}
+            {% if ann[:nilable] %}
+              if text.empty?
+                @{{ivar.name}} = nil
+                return true
+              end
+            {% end %}
+            {% if type_name == "String" %}
+              @{{ivar.name}} = text
+              return true
+            {% elsif type_name == "Bool" %}
+              @{{ivar.name}} = text.in?("true", "1", "on", "yes")
+              return true
+            {% elsif type_name == "Int32" %}
+              text.to_i32?.try { |v| @{{ivar.name}} = v; return true }
+            {% elsif type_name == "Int64" %}
+              text.to_i64?.try { |v| @{{ivar.name}} = v; return true }
+            {% elsif type_name == "Float64" %}
+              text.to_f64?.try { |v| @{{ivar.name}} = v; return true }
+            {% elsif type_name == "Float32" %}
+              text.to_f32?.try { |v| @{{ivar.name}} = v; return true }
+            {% end %}
+            return false
+          end
+        {% end %}
+      {% end %}
+      false
     end
 
     def component_name : String

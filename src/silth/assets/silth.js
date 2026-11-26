@@ -50,8 +50,11 @@ function morphNode(from, to) {
   // A nested live component keeps its own state while the parent passes the same props.
   if (from.hasAttribute("data-silth-live") && from.dataset.silthMounted &&
       from.getAttribute("data-silth-props") === to.getAttribute("data-silth-props")) return;
-  for (const attr of Array.from(from.attributes)) if (!to.hasAttribute(attr.name) && !RUNTIME_ATTRS.has(attr.name)) from.removeAttribute(attr.name);
-  for (const attr of Array.from(to.attributes)) if (from.getAttribute(attr.name) !== attr.value) from.setAttribute(attr.name, attr.value);
+  // silth-keep="open aria-expanded": attributes the browser owns once rendered (a
+  // dialog opened, a tab selected); a re-render leaves them as they are.
+  const kept = (from.getAttribute("silth-keep") || "").split(/\s+/).filter(Boolean);
+  for (const attr of Array.from(from.attributes)) if (!to.hasAttribute(attr.name) && !RUNTIME_ATTRS.has(attr.name) && !kept.includes(attr.name)) from.removeAttribute(attr.name);
+  for (const attr of Array.from(to.attributes)) if (from.getAttribute(attr.name) !== attr.value && !kept.includes(attr.name)) from.setAttribute(attr.name, attr.value);
   const focused = document.activeElement === from;
   if (from.tagName === "INPUT" || from.tagName === "TEXTAREA" || from.tagName === "SELECT") {
     if (!focused && from.type !== "file") {

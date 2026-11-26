@@ -1,0 +1,13 @@
+<div data-ui="dropdown" data-align="<%= align %>">
+  <button type="button" id="<%= dom_id %>-button" aria-haspopup="menu" aria-expanded="false" aria-controls="<%= dom_id %>" silth-keep="aria-expanded"><%= label %></button>
+  <div role="menu" id="<%= dom_id %>" aria-labelledby="<%= dom_id %>-button" hidden silth-keep="hidden">
+    <% items.each do |item| %>
+      <% if href = item.href %>
+        <a role="menuitem" tabindex="-1" href="<%= href %>"<% if m = item.method %> data-method="<%= m %>"<% end %><% if c = item.confirm %> data-confirm="<%= c %>"<% end %>><%= item.label %></a>
+      <% else %>
+        <button type="button" role="menuitem" tabindex="-1"<% if a = item.action %> silth-click="<%= a %>"<% end %><% if c = item.confirm %> silth-confirm="<%= c %>"<% end %>><%= item.label %></button>
+      <% end %>
+    <% end %>
+    <%= yield_slot %>
+  </div>
+</div>

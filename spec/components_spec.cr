@@ -129,3 +129,78 @@ describe Silth::Live::Upload do
     expect_raises(Silth::Forbidden) { Silth::Live::Upload.from_token("forged--token") }
   end
 end
+
+class BadgeComponent < Silth::Component
+  prop label : String
+  prop count : Int32 = 0
+  prop muted : Bool = false
+  prop hint : String? = nil
+  prop tags : Array(String) = [] of String
+  template "spec/fixtures/views/card.html.ecr"
+
+  def title : String
+    "#{label} (#{count})#{muted ? " muted" : ""}#{hint ? " #{hint}" : ""}"
+  end
+end
+
+class BadgeComponentPreview < Silth::ComponentPreview
+  description "Counters next to a label."
+
+  def default : Silth::Component
+    BadgeComponent.new(label: "Inbox", count: 3)
+  end
+
+  def in_a_panel : Silth::Component
+    PanelComponent.new.with_slots(content: "<p>Body</p>", footer: %(<a href="/all">All</a>))
+  end
+
+  def live_counter : Silth::Component
+    CounterLive.new(count: 5)
+  end
+end
+
+describe Silth::ComponentPreview do
+  it "lists scenarios and builds their components" do
+    Silth::ComponentPreview.all.should contain({"BadgeComponentPreview", ["default", "in_a_panel", "live_counter"]})
+    Silth::ComponentPreview.description_of("BadgeComponentPreview").should eq("Counters next to a label.")
+    Silth::ComponentPreview.build("BadgeComponentPreview", "default").not_nil!.render.should contain("Inbox (3)")
+    Silth::ComponentPreview.build("BadgeComponentPreview", "nope").should be_nil
+  end
+
+  it "describes props, edits the scalar ones and fills slots from code" do
+    badge = BadgeComponent.new(label: "Inbox", count: 3)
+    specs = badge.prop_specs.to_h { |s| {s.name, s} }
+    {specs["label"].type, specs["label"].value, specs["label"].default, specs["label"].editable}.should eq({"String", %("Inbox"), "nil", true})
+    {specs["hint"].nilable, specs["tags"].editable, specs["count"].default}.should eq({true, false, "0"})
+    badge.assign_prop_text("count", "12").should be_true
+    badge.assign_prop_text("muted", "true").should be_true
+    badge.assign_prop_text("hint", "new").should be_true
+    badge.assign_prop_text("count", "many").should be_false
+    badge.assign_prop_text("tags", "x").should be_false
+    badge.render.should contain("Inbox (12) muted new")
+    badge.assign_prop_text("hint", "").should be_true # nilable: empty means nil
+    badge.hint.should be_nil
+
+    panel = PanelComponent.new.with_slots(content: "<p>Body</p>", footer: %(<a href="/all">All</a>))
+    panel.render.should eq(%(<article><header></header><p>Body</p><footer><a href="/all">All</a></footer></article>))
+    panel.filled_slots.should eq(["content", "footer"])
+    Silth::Profiler::ComponentViewer.usage(badge).should eq(%(<%= component BadgeComponent, label: "Inbox", count: 12, muted: true %>))
+    Silth::Profiler::ComponentViewer.usage(panel).should eq("<% component PanelComponent do |c| %>\n  <% c.slot :footer do %>…<% end %>\n  …\n<% end %>")
+  end
+
+  it "serves the components section and the scenario frames" do
+    pages = {
+      "/_silth/profiler/components"                                                 => "BadgeComponent",
+      "/_silth/profiler/components/BadgeComponentPreview/default?w=375&p[count]=7" => "width:375px",
+      "/_silth/profiler/components/BadgeComponentPreview/default/frame?p[count]=7" => "Inbox (7)",
+      "/_silth/profiler/components/BadgeComponentPreview/live_counter/frame"      => %(data-silth-live="CounterLive"),
+    }
+    pages.each do |path, text|
+      io = IO::Memory.new
+      ctx = Silth::Context.new(HTTP::Server::Context.new(HTTP::Request.new("GET", path), HTTP::Server::Response.new(io)))
+      Silth::Profiler::Dashboard.serve(ctx)
+      ctx.response.close
+      io.to_s.should contain(text)
+    end
+  end
+end
