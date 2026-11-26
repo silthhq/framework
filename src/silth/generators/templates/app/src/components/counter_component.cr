@@ -14,6 +14,6 @@ class CounterComponent < Silth::LiveComponent
 
   action def reset
     @count = 0
-    emit "toast", {message: "Counter reset"}
+    emit "toast", {message: "Counter reset", variant: "success"} # shown by UI::Toaster
   end
 end

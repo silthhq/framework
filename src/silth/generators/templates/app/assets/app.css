@@ -114,4 +114,4 @@ input:not([type=checkbox]):not([type=radio]), textarea, select {
 .counter { max-width: 360px; text-align: center; margin: 0 auto; & .row { justify-content: center; } }
 .counter-value { font: 600 3.5rem/1 var(--mono); margin: 12px 0 20px; color: var(--pale); }
 [aria-busy=true] { opacity: .7; }
-.toast { position: fixed; right: 20px; bottom: 56px; background: var(--shell-2); border: 1px solid var(--rim-2); padding: 10px 14px; border-radius: 6px; }
+/* Dialog, dropdown, tabs and toasts: assets/ui.css */

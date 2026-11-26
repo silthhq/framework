@@ -1,12 +1,6 @@
 // Application entry point (ES module, loaded through the import map).
 import { silth } from "silth";
+import { ui } from "ui"; // dialog, dropdown, tabs and toasts (src/components/ui)
 
-window.addEventListener("silth:toast", (event) => {
-  const toast = document.createElement("div");
-  toast.className = "toast";
-  toast.textContent = event.detail?.message ?? "Done";
-  document.body.appendChild(toast);
-  setTimeout(() => toast.remove(), 2500);
-});
-
+export { silth, ui };
 export default silth;

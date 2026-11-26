@@ -8,6 +8,7 @@
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <%= csrf_meta_tags %>
   <%= stylesheet_tag "app.css" %>
+  <%= stylesheet_tag "ui.css" %>
   <%= importmap_tags %>
   <%= silth_scripts %>
 </head>
@@ -31,5 +32,6 @@
     <%= content %>
   </main>
   <footer class="footer"><span>Built with</span><a href="https://silth.dev">Silth</a></footer>
+  <%= component UI::Toaster %>
 </body>
 </html>

@@ -95,6 +95,12 @@ table.s-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .s-tl-src { flex: none; margin-left: auto; font: 11px var(--mono); color: var(--ash); } a.s-tl-src:hover { color: var(--soul); }
 details.s-more summary { cursor: pointer; color: var(--ash); font-size: 12px; } details.s-more[open] summary { margin-bottom: 6px; }
 
+/* Component previews */
+.s-preview-bar { display: flex; align-items: center; gap: 6px; margin: 0 0 10px; font-size: 12px; }
+.s-preview-stage { margin: 0 0 16px; padding: 16px; border: 1px solid var(--rim); border-radius: var(--radius); overflow: auto;
+  background-color: var(--abyss); background-image: radial-gradient(var(--rim) 1px, transparent 1px); background-size: 14px 14px; }
+.s-preview-frame { display: block; width: 100%; min-height: 160px; margin: 0 auto; border: 1px dashed var(--rim-2); border-radius: 4px; background: var(--void); resize: vertical; }
+
 /* Request timeline */
 .s-timeline { border: 1px solid var(--rim); border-radius: var(--radius); overflow: hidden; background: var(--abyss); }
 .s-tl-head, .s-tl-row { display: grid; grid-template-columns: minmax(220px, 34%) minmax(0, 1fr) 72px; align-items: center; }

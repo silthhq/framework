@@ -24,7 +24,8 @@ src/app.cr         loads everything (order matters: base classes first)
 src/models/        Silth::Model subclasses (columns, relations, validations, scopes)
 src/controllers/   Silth::Controller subclasses, one action per route
 src/views/         ECR templates (.html.ecr) — `<%= %>` is HTML escaped, `<%== %>` is raw
-src/components/    Silth::Component / Silth::LiveComponent
+src/components/    Silth::Component / Silth::LiveComponent; ui/ = accessible Dialog, Dropdown, Tabs, Toast (yours to edit)
+src/components/previews/  Silth::ComponentPreview scenarios, shown at /_silth/profiler/components
 src/jobs, mails, notifications, policies, events, listeners, channels, commands, requests
 db/migrations/     versioned migrations (`version YYYY_MM_DD_HHMMSS`)
 spec/              specs (`client.get("/")`, factories in spec/factories)
@@ -39,6 +40,7 @@ assets/            CSS/JS served as-is in dev, fingerprinted by `silth assets:bu
   Mass assignment must go through `params.permit(:a, :b, from: :model)`.
 - Templates are compiled into the binary: a template change needs a rebuild (`silth serve` does it).
 - Blocks in templates use control tags: `<% form_with url: …, model: post do |f| %> … <% end %>`.
+- Reuse the UI components before writing new markup: `UI::Dialog`, `UI::Dropdown`, `UI::Tabs`, `UI::Toast` (src/components/ui, keyboard behavior in assets/js/ui.js, looks in assets/ui.css). Give new components a preview in src/components/previews.
 - Authorization: policies in `src/policies` (`update?(user : User, post : Post) : Bool`), call `authorize! :update, post`.
 - Never commit secrets; configuration reads `${ENV_VAR:-default}` from YAML.
 - Prefer the query builder (`Post.where(published: true).order(created_at: :desc)`) over raw SQL; raw SQL always uses `?` placeholders.

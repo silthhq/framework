@@ -1,0 +1,10 @@
+<div data-ui="tabs" id="<%= dom_id %>">
+  <div role="tablist" aria-label="<%= label %>">
+    <% tabs.each do |tab| %>
+      <button type="button" role="tab" id="<%= dom_id %>-tab-<%= tab.key %>" aria-controls="<%= dom_id %>-panel-<%= tab.key %>" aria-selected="<%= selected?(tab) %>" tabindex="<%= selected?(tab) ? 0 : -1 %>" silth-keep="aria-selected tabindex"><%= tab.label %></button>
+    <% end %>
+  </div>
+  <% tabs.each do |tab| %>
+    <div role="tabpanel" id="<%= dom_id %>-panel-<%= tab.key %>" aria-labelledby="<%= dom_id %>-tab-<%= tab.key %>" tabindex="0"<% unless selected?(tab) %> hidden<% end %> silth-keep="hidden"><%= yield_slot "tab-#{tab.key}" %></div>
+  <% end %>
+</div>

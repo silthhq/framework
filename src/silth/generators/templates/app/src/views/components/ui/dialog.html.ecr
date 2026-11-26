@@ -1,0 +1,11 @@
+<div data-ui="dialog-root">
+  <% if label = trigger %><button type="button" data-ui-dialog="<%= id %>" aria-haspopup="dialog"><%= label %></button><% end %>
+  <dialog data-ui="dialog" id="<%= id %>" aria-labelledby="<%= id %>-title"<% if open %> data-ui-open<% end %><% if action = close_action %> data-ui-close-action="<%= action %>"<% end %> silth-keep="open">
+    <header data-ui="dialog-header">
+      <h2 id="<%= id %>-title"><%= title %></h2>
+      <button type="button" data-ui-close aria-label="<%= close_label %>">×</button>
+    </header>
+    <div data-ui="dialog-body"><%= yield_slot %></div>
+    <% if slot?(:actions) %><footer data-ui="dialog-actions"><%= yield_slot :actions %></footer><% end %>
+  </dialog>
+</div>

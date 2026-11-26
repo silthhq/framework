@@ -17,6 +17,7 @@ module Silth
           return ctx.redirect(Middleware::PREFIX)
         end
         return MailViewer.serve_raw(ctx, rest) if MailViewer.raw?(rest)
+        return ComponentViewer.serve_frame(ctx, rest) if ComponentViewer.raw?(rest)
         query = ctx.request.query_params
         current = nil
         page = case rest
@@ -27,6 +28,8 @@ module Silth
                when "workflows"             then workflows
                when "mails"                 then Page.new("Mails", MailViewer.index)
                when .starts_with?("mails/") then Page.new("Mail", MailViewer.show(rest), crumb: crumb("mails", "Mails"))
+               when "components"            then Page.new("Components", ComponentViewer.index)
+               when .starts_with?("components/") then ComponentViewer.show(rest, query, ctx.csp_nonce)
                else
                  if current = Profiler.find(rest)
                    show(current, query["panel"]? || "timeline", query["level"]?)
@@ -34,13 +37,14 @@ module Silth
                    Page.new("Profile not found", %(<div class="s-card s-empty">Profile <code>#{HTML.escape(rest)}</code> expired or never existed. The profiler keeps the last #{Silth.config.int("profiler.keep", 200)} requests in memory.</div>), crumb: crumb("", "Requests"), status: 404)
                  end
                end
-        section = rest.starts_with?("mails") ? "mails" : current || page.status == 404 ? "" : rest
+        section = rest.starts_with?("mails") ? "mails" : rest.starts_with?("components") ? "components" : current || page.status == 404 ? "" : rest
         ctx.html(Brand.page("#{page.title} · Silth profiler", layout(section, page, current), ctx.csp_nonce), page.status)
       end
 
       private def self.layout(section : String, page : Page, current : Profile?) : String
         profiles = Profiler.profiles
         sections = [{"", "Requests", profiles.size}, {"activity", "Activity", Profiler.background.size}, {"mails", "Mails", MailViewer.count},
+                    {"components", "Components", ComponentPreview.count},
                     {"routes", "Routes", Silth.router.routes.size}, {"schedule", "Schedule", Silth.scheduler.tasks.size},
                     {"workflows", "Workflows", Workflow.definitions.size}]
         nav = sections.map do |(path, name, count)|

@@ -446,6 +446,17 @@ module Silth
 
     # --- single file generators --------------------------------------------------
 
+    # An example value for a prop of *type* in a generated preview (nil: leave it out).
+    def self.sample_value(type : String) : String?
+      case type.rchop("?").sub(/ = .*/, "")
+      when "String"          then type.ends_with?("?") ? nil : %("Example")
+      when "Int32", "Int64"  then type.ends_with?("?") ? nil : "1"
+      when "Float64"         then type.ends_with?("?") ? nil : "1.5"
+      when "Bool"            then "true"
+      else                        nil
+      end
+    end
+
     def self.generate(kind : String, name : String, args : Array(String), force : Bool = false, output : IO = STDOUT) : Array(String)
       g = Scaffold.new(name, args)
       g.force = force
@@ -484,6 +495,16 @@ module Silth
         props = args.map { |a| f = Field.new(a); "  prop #{f.name} : #{f.crystal_type}" }
         g.create "src/components/#{Inflector.underscore(base)}_component.cr", "class #{base}Component < Silth::Component\n#{props.join('\n')}\n  template \"components/#{Inflector.underscore(base)}\"\nend\n"
         g.create "src/views/components/#{Inflector.underscore(base)}.html.ecr", %(<div class="#{Inflector.dasherize(base)}">\n  <%= yield_slot %>\n</div>\n)
+        samples = args.compact_map { |a| f = Field.new(a); Generators.sample_value(f.crystal_type).try { |v| "#{f.name}: #{v}" } }
+        g.create "src/components/previews/#{Inflector.underscore(base)}_component_preview.cr", <<-CR
+          # Shown in the profiler: /_silth/profiler/components
+          class #{base}ComponentPreview < Silth::ComponentPreview
+            def default : Silth::Component
+              #{base}Component.new(#{samples.join(", ")}).with_slots(content: "<p>Content</p>")
+            end
+          end
+
+          CR
       when "live"
         base = class_name.sub(/Component$/, "")
         g.create "src/components/#{Inflector.underscore(base)}_component.cr", <<-CR
@@ -502,6 +523,19 @@ module Silth
             <button class="btn" silth-click="increment">+1</button>
           </div>
           ECR
+        g.create "src/components/previews/#{Inflector.underscore(base)}_component_preview.cr", <<-CR
+          # Shown in the profiler: /_silth/profiler/components (live: the buttons work there too)
+          class #{base}ComponentPreview < Silth::ComponentPreview
+            def default : Silth::Component
+              #{base}Component.new
+            end
+
+            def started : Silth::Component
+              #{base}Component.new(count: 41)
+            end
+          end
+
+          CR
       when "job"
         base = class_name.sub(/Job$/, "")
         g.create "src/jobs/#{Inflector.underscore(base)}_job.cr", <<-CR

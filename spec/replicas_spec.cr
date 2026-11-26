@@ -83,18 +83,18 @@ describe Silth::DB::Replica do
   end
 
   it "tells reads from statements a replica must not run" do
-    {"SELECT 1"                                      => true,
-     "  (SELECT 1) UNION (SELECT 2)"                 => true,
-     "WITH t AS (SELECT 1) SELECT * FROM t"          => true,
-     "SHOW TABLES"                                   => true,
-     "SELECT * FROM jobs FOR UPDATE SKIP LOCKED"     => false,
-     "SELECT * FROM t LOCK IN SHARE MODE"            => false,
-     "SELECT * FROM t FOR NO KEY UPDATE"             => false,
-     "SELECT nextval('posts_id_seq')"                => false,
-     "SELECT pg_advisory_lock(1)"                    => false,
+    {"SELECT 1"                                                    => true,
+     "  (SELECT 1) UNION (SELECT 2)"                               => true,
+     "WITH t AS (SELECT 1) SELECT * FROM t"                        => true,
+     "SHOW TABLES"                                                 => true,
+     "SELECT * FROM jobs FOR UPDATE SKIP LOCKED"                   => false,
+     "SELECT * FROM t LOCK IN SHARE MODE"                          => false,
+     "SELECT * FROM t FOR NO KEY UPDATE"                           => false,
+     "SELECT nextval('posts_id_seq')"                              => false,
+     "SELECT pg_advisory_lock(1)"                                  => false,
      "WITH gone AS (DELETE FROM t RETURNING *) SELECT * FROM gone" => false,
-     "INSERT INTO t VALUES (1)"                      => false,
-     "UPDATE t SET a = 1"                            => false,
+     "INSERT INTO t VALUES (1)"                                    => false,
+     "UPDATE t SET a = 1"                                          => false,
     }.each do |sql, read|
       Silth::DB.read_statement?(sql).should eq(read), "#{sql.inspect} should#{read ? "" : " not"} be a read"
     end

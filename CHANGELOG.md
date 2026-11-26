@@ -45,6 +45,12 @@ The first release.
 - Performance budgets per route or handler (`profiler.budget_ms`, `profiler.budgets`): flagged in the toolbar and the dashboard, listed at the end of the test run, or failing the spec with `budget_strict` / `SILTH_BUDGETS=strict`.
 - Editor links: `file:line` in the debug page, the timeline, the queries and exceptions panels open in VS Code, Cursor, Zed, JetBrains IDEs, Sublime Text… or a URL template (`profiler.editor`, `SILTH_EDITOR`, `profiler.editor_root` for containers).
 
+### Front end
+
+- Component previews: `Silth::ComponentPreview` scenarios (like mail previews) listed in the profiler's Components section: each one in a frame with the app's stylesheets at several widths, its props (scalar ones editable on the page), its slots, the template code that renders it and its HTML. `Component#with_slots`, `#fill_slot`, `#prop_specs`, `#preview_usage`. `silth g component` and `silth g live` write a preview.
+- New apps ship accessible UI components, unstyled by default (`data-ui` hooks, looks in `assets/ui.css`): `UI::Dialog` (native `<dialog>`, server-driven `open` and `close_action` in live components), `UI::Dropdown` (menu button), `UI::Tabs`, `UI::Toast` and `UI::Toaster` (live regions, `emit "toast"` from live actions); keyboard behavior in `assets/js/ui.js` following the WAI-ARIA practices, previews included.
+- `silth-keep="attr …"`: attributes the browser owns (an open dialog, the selected tab) survive live component re-renders.
+
 ### Fixed before the release
 
 - `DB#transaction` commits when the block returns early (`return`, `break`); it used to hand the connection back to the pool with the transaction still open.
