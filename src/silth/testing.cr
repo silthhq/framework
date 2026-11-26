@@ -35,6 +35,7 @@ module Silth
       if migrate && DB.configured?
         fresh ? Migrator.new.fresh : Migrator.new.migrate
       end
+      prepare_internal_tables if transactional && DB.configured?
       Spec.before_each do
         @@client = nil
         Mailer.fake
@@ -55,6 +56,16 @@ module Silth
           end
         end
       end
+    end
+
+    # Creates the tables of the configured queue, batch and cache stores. They
+    # are created on first use otherwise, and inside the transaction wrapping an
+    # example that DDL would commit it on MySQL (and drop its savepoints).
+    # `setup` calls it; call it again after dropping every table (`Migrator#fresh`).
+    def self.prepare_internal_tables : Nil
+      Batch.store.as?(Batch::DatabaseStore).try &.ensure_table
+      Queue.driver.as?(Queue::DatabaseDriver).try &.prepare
+      Silth.cache.as?(DatabaseCache).try &.prepare
     end
 
     def self.client : TestClient
