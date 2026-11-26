@@ -119,6 +119,7 @@ module Silth
     def call(raw : HTTP::Server::Context) : Nil
       ctx = Context.new(raw)
       Fiber.current.silth_context = ctx
+      DB.begin_request(ctx)
       begin
         Chain.new(@middleware.to_a, ->(c : Context) { dispatch(c) }).next(ctx)
       ensure

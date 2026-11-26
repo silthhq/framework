@@ -4,6 +4,10 @@ require "uri"
 class Fiber
   # :nodoc: connections pinned by open transactions, per database name.
   property silth_db_tx : Hash(String, Silth::DB::Connection)?
+  # :nodoc: databases written during the current request or job: their reads stay on the primary.
+  property silth_db_written : Set(String)?
+  # :nodoc: depth of `DB.on_primary` blocks.
+  property silth_db_on_primary = 0
 end
 
 module Silth
@@ -17,6 +21,7 @@ module Silth
   #   primary:
   #     url: ${DATABASE_URL:-sqlite3://./db/development.sqlite3}
   #     pool: 10
+  #     replicas: [postgres://replica-1/app, postgres://replica-2/app]   # optional, see `Replica`
   #   analytics:
   #     url: postgres://localhost/analytics
   # ```
@@ -188,12 +193,29 @@ module Silth
       getter dialect : Dialect
       getter pool : Pool
       property slow_query_threshold : Time::Span = 500.milliseconds
+      # Read replicas: reads outside transactions go to one of them (see `Replica`).
+      getter replicas = [] of Replica
+      # How long the requests of a client keep reading from the primary after one
+      # of them wrote (a cookie): a redirect after a form then sees its own write.
+      property sticky_for : Time::Span = 2.seconds
+      @next_replica = Atomic(UInt32).new(0_u32)
 
-      def initialize(@name : String, url : String, pool_size : Int32 = 10, timeout : Time::Span = 5.seconds)
+      def initialize(@name : String, url : String, pool_size : Int32 = 10, @timeout : Time::Span = 5.seconds, replicas : Array(String) = [] of String)
         @url = DB.parse_url(url)
         @dialect = Dialect.for(@url.scheme || "")
         size = @dialect.name == "sqlite" && memory? ? 1 : pool_size
         @pool = Pool.new(size, timeout) { DB.open_connection(@url) }
+        replicas.each { |replica_url| add_replica(replica_url, pool_size) }
+      end
+
+      # Adds a read replica (same kind of database as the primary).
+      def add_replica(url : String, pool_size : Int32 = @pool.max_size) : Replica
+        replica = Replica.new(@replicas.size + 1, DB.parse_url(url), pool_size, @timeout)
+        unless Dialect.for(replica.url.scheme || "").name == @dialect.name
+          raise ConnectionError.new("Replica #{replica.url.scheme}:// of '#{@name}' is not a #{@dialect.name} database")
+        end
+        @replicas << replica
+        replica
       end
 
       def memory? : Bool
@@ -201,24 +223,57 @@ module Silth
       end
 
       # Runs a statement and returns its rows. Use `?` placeholders on every database.
+      #
+      # With replicas, a read (`SELECT`, `WITH`, `SHOW`, `EXPLAIN` without a locking
+      # clause) outside a transaction goes to a replica, unless the current request
+      # or job already wrote to this database (see `Replica`).
       def query(sql : String, args : Enumerable = [] of Value) : ResultSet
         values = DB.values(args)
         prepared = @dialect.prepare_sql(sql)
+        replica = route(sql)
         attempts = 0
         loop do
           attempts += 1
           started = Time.instant
           begin
-            result = with_connection { |conn| conn.query(prepared, values) }
+            result = replica ? replica.with_connection { |conn| conn.query(prepared, values) } : with_connection { |conn| conn.query(prepared, values) }
             duration = Time.instant - started
-            Instrument.query(sql, values, duration, @name, result.rows.empty? ? result.rows_affected.to_i32 : result.rows.size)
+            Instrument.query(sql, values, duration, replica ? "#{@name} (replica #{replica.index})" : @name, result.rows.empty? ? result.rows_affected.to_i32 : result.rows.size)
             Log.warn { "Slow query (#{duration.total_milliseconds.round(1)}ms): #{sql}" } if duration > @slow_query_threshold
             return result
           rescue ex : IO::Error | ConnectionError
+            if failed = replica # an unreachable replica: rest it, read from the primary
+              failed.rest
+              replica = nil
+              Log.warn { "Replica #{failed.index} of '#{@name}' unreachable (#{ex.message}); reading from the primary" }
+              attempts -= 1
+              next
+            end
             raise ex if attempts > 1 || in_transaction?
             Log.warn { "Database connection lost (#{ex.message}); retrying once" }
           end
         end
+      end
+
+      # The replica a statement runs on, or nil for the primary. Writes mark the
+      # current request or job: its later reads stay on the primary.
+      private def route(sql : String) : Replica?
+        return nil if @replicas.empty? || in_transaction?
+        unless DB.read_statement?(sql)
+          DB.mark_written(@name)
+          return nil
+        end
+        return nil if DB.on_primary? || DB.written?(@name)
+        @replicas.size.times do
+          replica = @replicas[@next_replica.add(1_u32) % @replicas.size]
+          return replica if replica.available?
+        end
+        nil
+      end
+
+      # True when reads can go to a replica.
+      def replicated? : Bool
+        !@replicas.empty?
       end
 
       def exec(sql : String, args : Enumerable = [] of Value) : Int64
@@ -229,8 +284,9 @@ module Silth
         query(sql, args).scalar
       end
 
-      # Executes several statements separated by `;` (no parameters).
+      # Executes several statements separated by `;` (no parameters), on the primary.
       def exec_script(sql : String) : Nil
+        DB.mark_written(@name) if replicated?
         started = Time.instant
         with_connection { |conn| conn.exec_script(sql) }
         Instrument.query(sql, [] of Value, Time.instant - started, @name)
@@ -264,6 +320,7 @@ module Silth
         if conn = txs[@name]?
           return savepoint(conn) { yield }
         end
+        DB.mark_written(@name) if replicated?
         conn = @pool.checkout
         txs[@name] = conn
         done = false
@@ -347,6 +404,7 @@ module Silth
 
       def close : Nil
         @pool.close
+        @replicas.each &.close
       end
     end
 
@@ -361,17 +419,19 @@ module Silth
       config.keys("database.connections").each do |name|
         url = config.string?("database.connections.#{name}.url") || next
         next if url.empty?
-        register(name, url, config.int("database.connections.#{name}.pool", 10),
-          config.int("database.connections.#{name}.timeout", 5).seconds)
+        key = "database.connections.#{name}"
+        db = register(name, url, config.int("#{key}.pool", 10), config.int("#{key}.timeout", 5).seconds,
+          replicas: config.array("#{key}.replicas").reject(&.empty?))
+        db.sticky_for = config.int("#{key}.sticky_for", 2).seconds
       end
       if @@databases.empty? && (url = ENV["DATABASE_URL"]? || config.string?("database.url"))
         register(@@default, url, config.int("database.pool", 10))
       end
     end
 
-    def self.register(name : String, url : String, pool : Int32 = 10, timeout : Time::Span = 5.seconds) : Database
+    def self.register(name : String, url : String, pool : Int32 = 10, timeout : Time::Span = 5.seconds, replicas : Array(String) = [] of String) : Database
       @@databases[name]?.try &.close
-      @@databases[name] = Database.new(name, url, pool, timeout)
+      @@databases[name] = Database.new(name, url, pool, timeout, replicas)
     end
 
     def self.[](name : String) : Database
