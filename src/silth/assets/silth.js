@@ -124,6 +124,8 @@ function mountMessage(el) {
 
 function applyResponse(data) {
   if (!data) return;
+  // The profiler's toolbar lists live actions as sub-requests (development only).
+  if (data.profile) window.dispatchEvent(new CustomEvent("silth:profile", { detail: data.profile }));
   if (data.error) { console.error("[silth]", data.error); return; }
   if (data.redirect) { location.href = data.redirect; return; }
   const el = document.getElementById(data.id);

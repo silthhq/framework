@@ -279,7 +279,12 @@ module Silth
     # Runs a component request and returns the JSON response.
     def self.process(message : JSON::Any, user : Auth::Authenticatable?) : String
       DB.reset_stickiness # each action reads from replicas until it writes
-      name = message["c"].as_s
+      name = message["c"]?.try(&.as_s?) || raise BadRequest.new("Missing live component name")
+      action = message["a"]?.try(&.as_s?)
+      Profiler.profile_live(action ? "#{name}##{action}" : "#{name} (refresh)") { process_message(name, message, user) }
+    end
+
+    private def self.process_message(name : String, message : JSON::Any, user : Auth::Authenticatable?) : String
       component = LiveComponent.build(name) || raise BadRequest.new("Unknown live component #{name}")
       component.user = user
       component.live_id = message["id"]?.try(&.as_s?)
@@ -298,6 +303,16 @@ module Silth
         json.object do
           json.field "ref", ref if ref
           json.field "id", component.live_id
+          if (profile = Fiber.current.silth_profile) && profile.method == "LIVE"
+            json.field "profile" do # for the debug toolbar's sub-requests
+              json.object do
+                json.field "token", profile.token
+                json.field "label", profile.url
+                json.field "ms", profile.elapsed_ms.round(2)
+                json.field "queries", profile.queries.size
+              end
+            end
+          end
           if url = component.__redirect
             json.field "redirect", url
           else
@@ -391,7 +406,9 @@ module Silth
               end
             rescue ex
               Log.warn(exception: ex) { "Live component error" }
-              send.call({ref: (JSON.parse(raw)["ref"]? rescue nil), error: Silth.development? ? ex.message : "Component error"}.to_json)
+              failed = Fiber.current.silth_failed_live_profile.try { |p| {token: p.token, label: p.url, status: 500} }
+              Fiber.current.silth_failed_live_profile = nil
+              send.call({ref: (JSON.parse(raw)["ref"]? rescue nil), error: Silth.development? ? ex.message : "Component error", profile: failed}.to_json)
             end
           end
           ws.on_close { subs.each { |(t, s)| PubSub.unsubscribe(t, s) } }

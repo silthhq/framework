@@ -88,6 +88,27 @@ describe Silth::Profiler do
     html.should contain("possible N+1")
     html.should contain(%(class="stb-fab"))
     html.should contain("/posts/1?x=&lt;b&gt;")
+    html.should contain(%(<div class="stb-item stb-xhr" tabindex="-1" hidden>)) # sub-requests, filled in the browser
+    html.should contain(%(res.headers.get("X-Silth-Profile")))
+  end
+
+  it "profiles live component actions as requests of their own" do
+    Silth::Profiler.enabled = true
+    state = Silth.verifier("live").generate(%({"count":1,"step":2}))
+    body = Silth::Live.process(JSON.parse({c: "CounterLive", s: state, a: "increment", id: "c1"}.to_json), nil)
+    info = JSON.parse(body)["profile"]
+    info["label"].should eq("CounterLive#increment")
+    live = Silth::Profiler.find(info["token"].as_s).not_nil!
+    {live.method, live.status, live.handler}.should eq({"LIVE", 200, "CounterLive#increment"})
+
+    expect_raises(Silth::BadRequest) do
+      Silth::Live.process(JSON.parse({c: "CounterLive", s: state, a: "nope", id: "c1"}.to_json), nil)
+    end
+    failed = Fiber.current.silth_failed_live_profile.not_nil!
+    {failed.status, failed.exceptions.first.name}.should eq({400, "Silth::BadRequest"})
+  ensure
+    Fiber.current.silth_failed_live_profile = nil
+    Silth::Profiler.clear
   end
 
   it "serves the dashboard panels" do
@@ -189,6 +210,72 @@ describe Silth::Profiler::Editor do
     ProfilerSpec.with_config("profiler:\n  editor: none") do
       Silth::Profiler::Editor.url("src/app.cr", 3).should be_nil
       Silth::Profiler::Editor.link("src/app.cr", 3).should eq(%(<code class="s-src">src/app.cr:3</code>))
+    end
+  end
+end
+
+describe Silth::Profiler::Storage do
+  it "keeps profiles across restarts in a SQLite file" do
+    path = "spec/tmp/profiler/profiles.sqlite3"
+    FileUtils.rm_rf("spec/tmp/profiler")
+    Silth::Profiler.clear
+    Silth::Profiler.persist(path)
+    p = ProfilerSpec.profile
+    p.duration_ms = 12.5
+    Silth::Profiler.store(p)
+    Silth::Profiler.stop_persisting
+
+    Silth::Profiler.clear              # a new process: empty memory
+    Silth::Profiler.persist(path)      # boot with persist: true
+    loaded = Silth::Profiler.find(p.token).not_nil!
+    {loaded.method, loaded.url, loaded.status, loaded.duration_ms}.should eq({"GET", "/posts/1?x=<b>", 200, 12.5})
+    loaded.queries.size.should eq(3)
+    loaded.translations[{"fr", "posts.title"}].count.should eq(2)
+    loaded.spans.map(&.kind).should eq(p.spans.map(&.kind))
+    loaded.logs.first.message.should eq("Careful <now>")
+    Silth::Profiler::Timeline.render(loaded).should contain("PostsController#show")
+
+    Silth::Profiler.clear
+    Silth::Profiler::Storage.new(path).load(10).should be_empty
+  ensure
+    Silth::Profiler.stop_persisting
+    Silth::Profiler.clear
+    FileUtils.rm_rf("spec/tmp/profiler")
+  end
+end
+
+describe Silth::Profiler::Budget do
+  it "resolves the handler's, then the route's, then the global budget" do
+    ProfilerSpec.with_config(%(profiler:\n  budget_ms: 300\n  budgets:\n    "GET /notes": 120\n    "NotesController#show": 80)) do
+      Silth::Profiler::Budget.for("GET", "/notes/:id", "NotesController#show").should eq(80.0)
+      Silth::Profiler::Budget.for("GET", "/notes", "NotesController#index").should eq(120.0)
+      Silth::Profiler::Budget.for("GET", "/hello", "NotesController#hello").should eq(300.0)
+    end
+    Silth::Profiler::Budget.for("GET", "/hello", "NotesController#hello").should be_nil
+  end
+
+  it "flags slow requests in the toolbar and reports them in the test run" do
+    p = ProfilerSpec.profile
+    p.duration_ms = 420.0
+    p.budget_ms = 300.0
+    p.over_budget?.should be_true
+    html = Silth::Profiler::Toolbar.render(p, nil)
+    html.should contain(%(<div class="stb-item  err" tabindex="-1"><a href="/_silth/profiler/#{p.token}?panel=timeline"))
+    html.should contain("300 ms, exceeded by 120 ms")
+
+    ProfilerSpec.with_config("profiler:\n  budget_ms: 0.000001") do
+      Silth::Testing.budget_reports.clear
+      Silth::Testing.client.get("/hello")
+      report = Silth::Testing.budget_reports.first
+      {report.route, report.source.try(&.starts_with?("spec/profiler_spec.cr"))}.should eq({"GET /hello", true})
+      output = IO::Memory.new
+      Silth::Testing.print_budget_reports(output)
+      output.to_s.should contain("Performance budgets exceeded")
+      ENV["SILTH_BUDGETS"] = "strict"
+      expect_raises(Spec::AssertionFailed, /over its 0.0 ms budget \(GET \/hello\)/) { Silth::Testing.client.get("/hello") }
+    ensure
+      ENV.delete("SILTH_BUDGETS")
+      Silth::Testing.budget_reports.clear
     end
   end
 end

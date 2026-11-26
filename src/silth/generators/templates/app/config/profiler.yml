@@ -8,3 +8,4 @@ editor: ${SILTH_EDITOR:-vscode}    # file:line links: vscode, cursor, zed, idea,
 
 when@development:
   enabled: true
+  persist: true                    # profiles survive the restarts of silth serve (tmp/profiler.sqlite3)

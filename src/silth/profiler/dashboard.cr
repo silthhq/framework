@@ -78,12 +78,15 @@ module Silth
           stat(io, times.empty? ? "-" : "#{Timeline.format_ms(times[times.size // 2])} ms", "Median time")
           stat(io, times.empty? ? "-" : "#{Timeline.format_ms(times.last)} ms", "Slowest")
           stat(io, all.count { |p| p.status >= 500 }.to_s, "Server errors", all.any? { |p| p.status >= 500 } ? "s-err" : "")
+          over = all.count(&.over_budget?)
+          stat(io, over.to_s, "Over budget", over > 0 ? "s-err" : "") if all.any?(&.budget_ms)
           stat(io, all.empty? ? "-" : (all.sum(&.queries.size) / all.size).round(1).to_s, "Queries per request")
           io << "</div>"
         end
         rows = list.map do |p|
           warn = p.duplicated_queries > 0 || !p.missing_translations.empty? || p.log_count("warn", "error", "fatal") > 0
-          %(<tr><td><span class="s-badge #{p.status_class}">#{p.status}</span></td><td class="mono s-muted">#{HTML.escape(p.method)}</td><td class="mono"><a class="row-link" href="#{url(p.token)}">#{HTML.escape(p.url)}</a>#{warn ? %( <span class="s-dot warn" title="Warnings: logs, duplicated queries or missing translations"></span>) : ""}</td><td class="s-muted">#{HTML.escape(p.handler)}</td><td class="num">#{Timeline.format_ms(p.duration_ms)} ms</td><td class="num">#{p.queries.size}</td><td class="num s-muted">#{p.started_at.to_local.to_s("%H:%M:%S")}</td><td class="num"><a class="mono" href="#{url(p.token)}">#{p.token}</a></td></tr>)
+          budget = p.over_budget? ? %( <span class="s-badge err" title="Budget #{Timeline.format_ms(p.budget_ms.not_nil!)} ms">over budget</span>) : ""
+          %(<tr><td><span class="s-badge #{p.status_class}">#{p.status}</span></td><td class="mono s-muted">#{HTML.escape(p.method)}</td><td class="mono"><a class="row-link" href="#{url(p.token)}">#{HTML.escape(p.url)}</a>#{warn ? %( <span class="s-dot warn" title="Warnings: logs, duplicated queries or missing translations"></span>) : ""}</td><td class="s-muted">#{HTML.escape(p.handler)}</td><td class="num#{p.over_budget? ? " s-err" : ""}">#{Timeline.format_ms(p.duration_ms)} ms#{budget}</td><td class="num">#{p.queries.size}</td><td class="num s-muted">#{p.started_at.to_local.to_s("%H:%M:%S")}</td><td class="num"><a class="mono" href="#{url(p.token)}">#{p.token}</a></td></tr>)
         end.join
         content = <<-HTML
           #{stats}
@@ -116,7 +119,8 @@ module Silth
         stats = String.build do |io|
           io << %(<div class="s-grid">)
           stat(io, p.status.to_s, HTTP::Status.new(p.status).description || "Status", "s-#{p.status_class}")
-          stat(io, "#{Timeline.format_ms(p.duration_ms)} ms", "Total")
+          stat(io, "#{Timeline.format_ms(p.duration_ms)} ms", "Total", p.over_budget? ? "s-err" : "")
+          p.budget_ms.try { |b| stat(io, "#{Timeline.format_ms(b)} ms", p.over_budget? ? "Budget, exceeded" : "Budget", p.over_budget? ? "s-err" : "s-ok") }
           p.before_action_ms.try { |v| stat(io, "#{Timeline.format_ms(v)} ms", "Before the action") }
           p.action_ms.try { |v| stat(io, "#{Timeline.format_ms(v)} ms", "Action") }
           stat(io, "#{Timeline.format_ms(p.view_ms)} ms", "Templates")

@@ -1,6 +1,8 @@
 class Fiber
   # :nodoc:
   property silth_profile : Silth::Profiler::Profile?
+  # :nodoc: the profile of a live action that raised, for the error message.
+  property silth_failed_live_profile : Silth::Profiler::Profile?
 end
 
 module Silth
@@ -23,23 +25,35 @@ module Silth
 
     # A line of application code: where a query came from.
     record Source, file : String, line : Int32, method : String = "" do
+      include JSON::Serializable
+
       def to_s(io : IO) : Nil
         io << file << ':' << line
       end
     end
 
     record QueryEntry, sql : String, args : Array(String), ms : Float64, connection : String, rows : Int32, start_ms : Float64 = 0.0,
-      source : Source? = nil
+      source : Source? = nil do
+      include JSON::Serializable
+    end
 
     # The same statement run several times from the same line of code: the
     # signature of an N+1 (a query inside a loop).
     record Repeat, sql : String, source : Source?, count : Int32, ms : Float64
-    record LogEntry, level : String, source : String, message : String, at : Time, offset_ms : Float64 = 0.0
-    record Entry, kind : String, label : String, detail : String, at : Time, ms : Float64? = nil, offset_ms : Float64? = nil
-    record ExceptionEntry, name : String, message : String, backtrace : Array(String), offset_ms : Float64
+    record LogEntry, level : String, source : String, message : String, at : Time, offset_ms : Float64 = 0.0 do
+      include JSON::Serializable
+    end
+    record Entry, kind : String, label : String, detail : String, at : Time, ms : Float64? = nil, offset_ms : Float64? = nil do
+      include JSON::Serializable
+    end
+    record ExceptionEntry, name : String, message : String, backtrace : Array(String), offset_ms : Float64 do
+      include JSON::Serializable
+    end
 
     # How a translation key was resolved during a request.
     class TranslationEntry
+      include JSON::Serializable
+
       getter key : String
       getter locale : String
       getter status : String
@@ -57,6 +71,8 @@ module Silth
     # the request; `duration_ms` is nil while the span is still open (or for
     # instant events such as a log line).
     class Span
+      include JSON::Serializable
+
       getter kind : String
       getter label : String
       getter detail : String
@@ -74,10 +90,25 @@ module Silth
       end
     end
 
+    # Translations keyed by {locale, key}, stored as a list in JSON.
+    module TranslationsConverter
+      def self.to_json(value : Hash({String, String}, TranslationEntry), json : JSON::Builder) : Nil
+        json.array { value.each_value(&.to_json(json)) }
+      end
+
+      def self.from_json(pull : JSON::PullParser) : Hash({String, String}, TranslationEntry)
+        Array(TranslationEntry).new(pull).to_h { |t| { {t.locale, t.key}, t } }
+      end
+    end
+
     class Profile
+      include JSON::Serializable
+
       getter token : String = Crypto.hex_token(6)
       getter started_at : Time = Time.utc
-      getter clock : Time::Instant
+      # The request's start on the monotonic clock (not kept when the profile is saved).
+      @[JSON::Field(ignore: true)]
+      getter clock : Time::Instant = Time.instant
       property method = ""
       property path = ""
       property url = ""
@@ -94,11 +125,14 @@ module Silth
       getter entries = [] of Entry
       getter exceptions = [] of ExceptionEntry
       getter spans = [] of Span
+      @[JSON::Field(converter: Silth::Profiler::TranslationsConverter)]
       getter translations = {} of {String, String} => TranslationEntry
       property request_headers = {} of String => String
       property response_headers = {} of String => String
       property params = {} of String => String
       property session = {} of String => String
+      # The route's performance budget in milliseconds (see `Budget`).
+      property budget_ms : Float64? = nil
 
       def initialize(@clock : Time::Instant = Time.instant)
       end
@@ -197,6 +231,10 @@ module Silth
       def status_class : String
         @status >= 500 ? "err" : @status >= 400 ? "warn" : "ok"
       end
+
+      def over_budget? : Bool
+        !!@budget_ms.try { |budget| total_ms > budget }
+      end
     end
 
     @@profiles = Deque(Profile).new
@@ -234,6 +272,44 @@ module Silth
           @@profiles.shift
         end
       end
+      if storage = @@storage
+        begin
+          storage.save(profile, keep)
+        rescue ex
+          @@storage = nil
+          ::Log.for("silth.profiler").warn { "Profiles are no longer saved to #{storage.path}: #{ex.message}" }
+        end
+      end
+    end
+
+    @@storage : Storage? = nil
+
+    # Where profiles are saved (`profiler.persist`), nil when they live in memory only.
+    def self.storage : Storage?
+      @@storage
+    end
+
+    # Saves profiles to the SQLite file at *path* from now on and loads the ones
+    # it already holds (`profiler.persist: true` does it at boot).
+    def self.persist(path : String = Silth.config.string("profiler.persist_path", "tmp/profiler.sqlite3")) : Nil
+      @@storage.try &.close
+      storage = Storage.new(path)
+      @@storage = storage
+      keep = Silth.config.int("profiler.keep", 200)
+      loaded = storage.load(keep)
+      @@mutex.synchronize do
+        known = @@profiles.map(&.token).to_set
+        loaded.reject { |p| known.includes?(p.token) }.reverse_each { |p| @@profiles.unshift(p) }
+        while @@profiles.size > keep
+          @@profiles.shift
+        end
+      end
+    end
+
+    # Back to memory only.
+    def self.stop_persisting : Nil
+      @@storage.try &.close
+      @@storage = nil
     end
 
     def self.slow_query_ms : Int32
@@ -283,10 +359,18 @@ module Silth
 
     def self.clear : Nil
       @@mutex.synchronize { @@profiles.clear; @@background.clear }
+      @@storage.try &.clear
     end
 
     def self.boot : Nil
       return unless enabled?
+      if Silth.config.bool("profiler.persist", false)
+        begin
+          persist
+        rescue ex
+          ::Log.for("silth.profiler").warn { "Cannot save profiles (#{ex.message}): keeping them in memory" }
+        end
+      end
       Instrument.subscribe { |event| record(event, Fiber.current.silth_profile) }
       Logging.on_entry do |log|
         next if log.source.starts_with?("silth.http")
@@ -306,6 +390,36 @@ module Silth
         else
           record_background(Entry.new("exception", ex.class.name, ex.message || "", Time.utc))
         end
+      end
+    end
+
+    # Profiles one live component action (a WebSocket message or a POST to
+    # `/_silth/live`) as a request of its own, method `LIVE`: the action's
+    # response carries its token so the toolbar lists it as a sub-request.
+    def self.profile_live(label : String, & : -> String) : String
+      return yield unless enabled?
+      profile = Profile.new
+      profile.method = "LIVE"
+      profile.path = Live::Endpoint::PATH
+      profile.url = label
+      profile.route = Live::Endpoint::PATH
+      profile.handler = label
+      profile.budget_ms = Budget.for("LIVE", Live::Endpoint::PATH, label)
+      previous = Fiber.current.silth_profile
+      Fiber.current.silth_profile = profile
+      begin
+        result = yield
+        profile.status = 200
+        result
+      rescue ex
+        profile.status = ex.is_a?(HTTPError) ? ex.status.code : 500
+        profile.exceptions << ExceptionEntry.new(ex.class.name, ex.message || "", (ex.backtrace? || [] of String).first(25), profile.elapsed_ms)
+        Fiber.current.silth_failed_live_profile = profile
+        raise ex
+      ensure
+        profile.duration_ms = profile.elapsed_ms
+        store(profile)
+        Fiber.current.silth_profile = previous
       end
     end
 
@@ -399,6 +513,7 @@ module Silth
         profile.status = ctx.status
         profile.route = ctx.route.try(&.path) || "-"
         profile.handler = ctx.route.try(&.handler_name) || "-"
+        profile.budget_ms = ctx.route.try { |r| Budget.for(r.method, r.path, r.handler_name) }
         profile.memory_kb = ((GC.stats.heap_size.to_i64 - before_heap.to_i64) // 1024)
         profile.user = ctx.auth_user.try { |u| "#{u.class.name}##{u.auth_id}" }
         profile.locale = ctx.locale
@@ -412,6 +527,8 @@ module Silth
 end
 
 require "./profiler/editor"
+require "./profiler/storage"
+require "./profiler/budget"
 require "./profiler/timeline"
 require "./profiler/toolbar"
 require "./profiler/mail_viewer"

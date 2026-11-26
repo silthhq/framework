@@ -15,6 +15,7 @@ module Silth
         "events" => %(<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>),
         "error"  => %(<path d="M12 3 2 21h20z"/><path d="M12 10v5M12 18h.01"/>),
         "user"   => %(<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6 8-6s8 2 8 6"/>),
+        "subs"   => %(<path d="M7 7h11l-3-3M17 17H6l3 3"/>),
         "hide"   => %(<path d="m6 9 6 6 6-6"/>),
       }
 
@@ -32,6 +33,7 @@ module Silth
           i18n_item(io, p, base) unless p.translations.empty?
           events_item(io, p, base) unless p.entries.empty?
           exceptions_item(io, p, base) unless p.exceptions.empty?
+          subrequests_item(io)
           io << %(<div class="stb-fill"></div>)
           user_item(io, p, base)
           version_item(io)
@@ -59,10 +61,15 @@ module Silth
 
       private def self.time_item(io, p : Profile, base : String) : Nil
         total = p.total_ms
-        item(io, "#{base}?panel=timeline", "", "Time") do |label, pop|
+        budget = p.budget_ms
+        item(io, "#{base}?panel=timeline", p.over_budget? ? "err" : "", "Time") do |label, pop|
           label << icon("time") << %(<b>#{Timeline.format_ms(total)}</b><span class="stb-u">ms</span>)
+          label << %(<span class="stb-lbl">/ #{Timeline.format_ms(budget)}</span>) if budget && p.over_budget?
           pop << "<h4>Time</h4>"
           rows = {"Total" => ms(total)}
+          if budget
+            rows["Budget"] = p.over_budget? ? "#{ms(budget)}, exceeded by #{ms(total - budget)}" : "#{ms(budget)} (#{percent(total, budget)} used)"
+          end
           p.before_action_ms.try { |v| rows["Before the action"] = ms(v) }
           p.action_ms.try { |v| rows["Action"] = ms(v) }
           rows["Templates"] = ms(p.view_ms) if p.view_ms > 0
@@ -162,6 +169,15 @@ module Silth
         end
       end
 
+      # Filled in the browser: fetch and XHR calls answered with an
+      # `X-Silth-Profile` header, and live component actions (`silth:profile`
+      # events), each linking to its own profile. Hidden until the first one.
+      private def self.subrequests_item(io) : Nil
+        io << %(<div class="stb-item stb-xhr" tabindex="-1" hidden><a href="#{Middleware::PREFIX}" target="_blank" rel="noopener" title="Sub-requests">)
+        io << icon("subs") << %(<b>0</b><span class="stb-lbl">sub-requests</span></a>)
+        io << %(<div class="stb-pop" role="tooltip"><h4>Sub-requests</h4><p class="stb-hint">fetch, XHR and live component actions of this page, newest first</p><ul class="stb-list stb-subs"></ul></div></div>)
+      end
+
       private def self.user_item(io, p : Profile, base : String) : Nil
         item(io, "#{base}?panel=request", "", "User", "stb-opt stb-end") do |label, pop|
           label << icon("user") << %(<span class="stb-lbl">#{HTML.escape(short(p.user || "guest", 32))}</span>)
@@ -251,6 +267,14 @@ module Silth
         #silth-toolbar .stb-list .stb-src{flex:none;max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#868ba3;font:11px/1.4 "JetBrains Mono",ui-monospace,Menlo,monospace;text-decoration:none}
         #silth-toolbar .stb-list a.stb-src{color:#a6dcff}#silth-toolbar .stb-list a.stb-src:hover{text-decoration:underline}
         #silth-toolbar code.warn{color:#e3bb74}#silth-toolbar code.err{color:#ff6b81}
+        #silth-toolbar .stb-item[hidden]{display:none}
+        #silth-toolbar .stb-hint{margin:-4px 0 0;color:#868ba3;font-size:11.5px}
+        #silth-toolbar .stb-subs{max-height:min(320px,60vh);overflow-y:auto}
+        #silth-toolbar .stb-subs a{display:grid;grid-template-columns:42px 34px minmax(0,1fr) auto;gap:8px;align-items:baseline;color:#b9bdd0;text-decoration:none;padding:1px 0}
+        #silth-toolbar .stb-subs a:hover code{color:#a6dcff}
+        #silth-toolbar .stb-item .stb-subs b{font-size:11px;color:#868ba3}#silth-toolbar .stb-subs span{text-align:right}
+        #silth-toolbar .stb-subs i{font:normal 11.5px "JetBrains Mono",ui-monospace,Menlo,monospace;color:#82dcae}
+        #silth-toolbar .stb-subs i.warn{color:#e3bb74}#silth-toolbar .stb-subs i.err{color:#ff6b81}
         #silth-toolbar .stb-more{display:inline-block;margin-top:10px;color:#a6dcff;text-decoration:none}
         #silth-toolbar .stb-more:hover,#silth-toolbar .stb-links a:hover{text-decoration:underline}
         #silth-toolbar .stb-links{display:flex;gap:12px;margin:10px 0 0}
@@ -276,7 +300,22 @@ module Silth
         try{if(localStorage.getItem(k)==="min")t.classList.add("stb-min")}catch(e){}
         t.querySelector(".stb-hide").addEventListener("click",()=>fold(true));
         t.querySelector(".stb-fab").addEventListener("click",()=>fold(false));
-        t.querySelectorAll(".stb-item").forEach(i=>i.addEventListener("keydown",e=>{if(e.key==="Escape")document.activeElement.blur()}))})()
+        t.querySelectorAll(".stb-item").forEach(i=>i.addEventListener("keydown",e=>{if(e.key==="Escape")document.activeElement.blur()}));
+        const sub=t.querySelector(".stb-xhr");if(!sub)return;
+        const list=sub.querySelector(".stb-subs"),count=sub.querySelector("b"),link=sub.querySelector("a");let n=0;
+        const el=(tag,text,cls)=>{const e=document.createElement(tag);e.textContent=text;if(cls)e.className=cls;return e};
+        const add=r=>{n++;sub.hidden=false;count.textContent=n;
+          const st=r.status>=500?"err":r.status>=400?"warn":"";if(st&&!sub.classList.contains("err")){sub.classList.remove("warn");sub.classList.add(st)}
+          const a=document.createElement("a");a.href="#{Middleware::PREFIX}/"+r.token;a.target="_blank";a.rel="noopener";
+          a.append(el("b",r.method),el("i",String(r.status),st),el("code",String(r.url).replace(location.origin,"")),el("span",r.ms==null?"":(Math.round(r.ms*10)/10)+" ms"));
+          const li=document.createElement("li");li.append(a);list.prepend(li);while(list.children.length>20)list.lastChild.remove();link.href=a.href};
+        const f=window.fetch;if(f)window.fetch=function(input,init){const s=performance.now(),m=String((init&&init.method)||(input&&input.method)||"GET").toUpperCase(),u=typeof input==="string"?input:(input&&input.url)||String(input);
+          return f.apply(this,arguments).then(res=>{const tk=res.headers.get("X-Silth-Profile");if(tk)add({token:tk,method:m,url:res.url||u,status:res.status,ms:performance.now()-s});return res})};
+        const X=window.XMLHttpRequest&&XMLHttpRequest.prototype;if(X){const open=X.open,send=X.send;
+          X.open=function(m,u){this.__stb=[String(m).toUpperCase(),String(u)];return open.apply(this,arguments)};
+          X.send=function(){const x=this,s=performance.now();x.addEventListener("loadend",()=>{let tk=null;try{tk=x.getResponseHeader("X-Silth-Profile")}catch(e){}
+            if(tk)add({token:tk,method:x.__stb?x.__stb[0]:"GET",url:x.responseURL||(x.__stb?x.__stb[1]:""),status:x.status,ms:performance.now()-s})});return send.apply(this,arguments)}}
+        window.addEventListener("silth:profile",e=>{const d=e.detail||{};if(d.token)add({token:d.token,method:"LIVE",url:d.label||"",status:d.status||200,ms:d.ms})})})()
         JS
     end
   end

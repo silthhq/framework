@@ -72,6 +72,42 @@ module Silth
       @@client ||= TestClient.new
     end
 
+    # A request of the test suite that took longer than its route's budget.
+    record BudgetReport, method : String, path : String, route : String, ms : Float64, budget_ms : Float64, source : String?
+
+    class_getter budget_reports = [] of BudgetReport
+    @@budget_summary = false
+
+    # Compares a test request with its route's performance budget
+    # (`profiler.budget_ms`, `profiler.budgets`): reported at the end of the run,
+    # or a failed example with `profiler.budget_strict: true` / `SILTH_BUDGETS=strict`.
+    def self.check_budget(method : String, path : String, elapsed : Time::Span) : Nil
+      match = Silth.router.match(method, path.partition('?')[0]) || return
+      route = match.route
+      budget = Profiler::Budget.for(route.method, route.path, route.handler_name) || return
+      ms = elapsed.total_milliseconds
+      return if ms <= budget
+      source = Profiler.app_source.try(&.to_s)
+      report = BudgetReport.new(method, path, "#{route.method} #{route.path}", ms, budget, source)
+      if Profiler::Budget.strict?
+        raise Spec::AssertionFailed.new("#{method} #{path} took #{ms.round(1)} ms, over its #{budget.round(1)} ms budget (#{report.route})",
+          source.try(&.rpartition(':')[0]) || __FILE__, source.try(&.rpartition(':')[2].to_i?) || __LINE__)
+      end
+      @@budget_reports << report
+      unless @@budget_summary
+        @@budget_summary = true
+        Spec.after_suite { print_budget_reports }
+      end
+    end
+
+    def self.print_budget_reports(io : IO = STDOUT) : Nil
+      return if @@budget_reports.empty?
+      io.puts "\n\nPerformance budgets exceeded (config/profiler.yml):"
+      @@budget_reports.each do |r|
+        io.puts "  #{r.method} #{r.path}  #{r.ms.round(1)} ms > #{r.budget_ms.round(1)} ms  (#{r.route}#{r.source ? ", #{r.source}" : ""})"
+      end
+    end
+
     struct TestResponse
       getter status : Int32
       getter headers : HTTP::Headers
@@ -192,7 +228,9 @@ module Silth
         request = HTTP::Request.new(method, path, h, body)
         io = IO::Memory.new
         response = HTTP::Server::Response.new(io)
+        started = Time.instant
         Silth.app.call(HTTP::Server::Context.new(request, response))
+        Testing.check_budget(method, path, Time.instant - started)
         response.close
         parsed = HTTP::Client::Response.from_io(IO::Memory.new(io.to_s), ignore_body: method == "HEAD")
         parsed.cookies.each { |c| c.value.empty? ? @cookies.delete(c.name) : (@cookies << c) }
