@@ -307,18 +307,78 @@ module Silth::Commands
     end
   end
 
+  # `silth db:console`: the database's own client on the configured connection.
+  # The password goes through the environment (`PGPASSWORD`, `MYSQL_PWD`), never
+  # the command line where `ps` would show it.
   class DbConsole < DatabaseCommand
-    command "db:console", "Open the database client (psql, mysql, sqlite3)"
+    command "db:console", "Open the database client (psql, mariadb/mysql, sqlite3)"
+    option connection : String = "", "Connection name from config/database.yml", short: "c"
+    option replica : Bool = false, "Open the first read replica instead of the primary"
+    option print : Bool = false, "Print the command instead of running it (without the password)"
+
+    record Client, program : String, args : Array(String), env : Hash(String, String)
+
+    def connection_name : String?
+      connection.presence
+    end
 
     def run : Nil
-      url = database.url
-      case database.dialect.name
-      when "postgres" then Process.exec("psql", [url.to_s])
+      db = database
+      url = if replica
+              db.replicas.first?.try(&.url) || raise Error.new("Connection '#{db.name}' has no replica")
+            else
+              db.url
+            end
+      client = DbConsole.client(db.dialect.name, url)
+      if print
+        line client.args.empty? ? client.program : "#{client.program} #{Process.quote(client.args)}"
+        client.env.each_key { |key| line "  #{key}=#{key.ends_with?("PWD") || key.ends_with?("PASSWORD") ? "…" : client.env[key]}" }
+        return
+      end
+      program = Process.find_executable(client.program) ||
+                raise Error.new("#{client.program} is not installed (#{DbConsole.install_hint(db.dialect.name)})")
+      Process.exec(program, client.args, env: client.env)
+    end
+
+    # The client command for a connection URL.
+    #
+    # ```
+    # DbConsole.client("postgres", URI.parse("postgres://app:secret@db:5432/blog?sslmode=require"))
+    # # => Client(program: "psql", args: [], env: {"PGHOST" => "db", …, "PGPASSWORD" => "secret", "PGSSLMODE" => "require"})
+    # ```
+    def self.client(dialect : String, url : URI) : Client
+      user = url.user.presence.try { |u| URI.decode_www_form(u) }
+      password = url.password.try { |p| URI.decode_www_form(p) }
+      database = url.path.lchop('/')
+      params = url.query_params
+      case dialect
+      when "postgres"
+        env = {"PGHOST" => url.host.presence || "localhost", "PGPORT" => (url.port || 5432).to_s, "PGDATABASE" => database}
+        user.try { |u| env["PGUSER"] = u }
+        password.try { |p| env["PGPASSWORD"] = p }
+        params["sslmode"]?.try { |m| env["PGSSLMODE"] = m }
+        env["PGAPPNAME"] = "silth db:console"
+        Client.new("psql", [] of String, env)
       when "mysql"
-        args = ["-h", url.host || "localhost", "-P", (url.port || 3306).to_s, "-u", url.user || "root", url.path.lchop('/')]
-        args.insert(0, "-p#{url.password}") if url.password
-        Process.exec("mysql", args)
-      else Process.exec("sqlite3", [url.path])
+        program = Process.find_executable("mariadb") ? "mariadb" : "mysql"
+        args = ["--host=#{url.host.presence || "localhost"}", "--port=#{url.port || 3306}", "--user=#{user || "root"}"]
+        if %w(true required require 1 verify).includes?(params["ssl"]? || params["sslmode"]? || "")
+          args << (program == "mariadb" ? "--ssl" : "--ssl-mode=REQUIRED")
+        end
+        args << database unless database.empty?
+        env = {} of String => String
+        password.try { |p| env["MYSQL_PWD"] = p }
+        Client.new(program, args, env)
+      else
+        Client.new("sqlite3", [url.path.presence || url.host || ":memory:"], {} of String => String)
+      end
+    end
+
+    def self.install_hint(dialect : String) : String
+      case dialect
+      when "postgres" then "apt install postgresql-client, brew install libpq"
+      when "mysql"    then "apt install mariadb-client, brew install mariadb or mysql-client"
+      else                 "apt install sqlite3, brew install sqlite"
       end
     end
   end

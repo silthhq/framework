@@ -34,6 +34,7 @@ The first release.
 ### Database
 
 - Read replicas: `replicas:` per connection; reads go to the replicas in turn, writes and transactions to the primary, reads after a write stay on the primary for the rest of the request or job and, through a cookie, for `sticky_for` seconds; `DB.on_primary { }`; an unreachable replica is skipped for 10 seconds.
+- `silth db:console` passes the password through the environment instead of the command line, follows the URL's TLS settings, prefers the `mariadb` client, and takes `--connection`, `--replica` and `--print`.
 - MariaDB `ed25519` and `parsec` (11.6+) authentication, with an in-house Ed25519 signature: `ed25519` derives its key from SHA-512 of the password, which OpenSSL's EVP API cannot take.
 
 ### Profiler and developer experience
