@@ -40,6 +40,9 @@ The first release.
 ### Profiler and developer experience
 
 - Each query is traced back to the line of application code that ran it (queries panel, timeline, toolbar); the same statement from the same line several times is reported as a possible N+1 with that line. `profiler.query_sources` turns it off.
+- Sub-requests in the toolbar: `fetch`/XHR calls answered with an `X-Silth-Profile` header and live component actions (now profiled as `LIVE` requests), each linking to its own profile.
+- Profiles can be saved to `tmp/profiler.sqlite3` (`profiler.persist`, on in development for new apps) so they survive the restarts of `silth serve`.
+- Performance budgets per route or handler (`profiler.budget_ms`, `profiler.budgets`): flagged in the toolbar and the dashboard, listed at the end of the test run, or failing the spec with `budget_strict` / `SILTH_BUDGETS=strict`.
 - Editor links: `file:line` in the debug page, the timeline, the queries and exceptions panels open in VS Code, Cursor, Zed, JetBrains IDEs, Sublime Text… or a URL template (`profiler.editor`, `SILTH_EDITOR`, `profiler.editor_root` for containers).
 
 ### Fixed before the release

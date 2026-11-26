@@ -90,7 +90,7 @@ table.s-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .s-nav a { color: var(--ash); font-weight: 500; } .s-nav a.active, .s-nav a:hover { color: var(--pale); text-decoration: none; }
 .s-sql { color: var(--mist); white-space: pre-wrap; font-family: var(--mono); font-size: 12.5px; } .s-sql .kw { color: var(--dusk); }
 .s-src { font: 12px var(--mono); color: var(--soul); white-space: nowrap; } code.s-src { color: var(--mist); }
-.s-src-cell { max-width: 280px; } .s-src-cell .s-src { white-space: normal; word-break: break-all; }
+.s-src-cell { min-width: 200px; max-width: 340px; } .s-src-cell .s-src { white-space: normal; overflow-wrap: anywhere; }
 .s-from { margin-top: 4px; color: var(--ash); font-size: 12px; }
 .s-tl-src { flex: none; margin-left: auto; font: 11px var(--mono); color: var(--ash); } a.s-tl-src:hover { color: var(--soul); }
 details.s-more summary { cursor: pointer; color: var(--ash); font-size: 12px; } details.s-more[open] summary { margin-bottom: 6px; }
