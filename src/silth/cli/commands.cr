@@ -445,6 +445,14 @@ module Silth::Commands
     option output : String = "dist", "Output directory", short: "o"
     option paths : String = "", "Extra comma separated paths to render"
 
+    # Where *path* is written: as is when it names a file (`/llms.txt`), as
+    # `index.html` inside it otherwise (`/docs`, `/docs/0.1`: a version number is
+    # not an extension).
+    def self.output_file(path : String) : String
+      return "/index.html" if path == "/"
+      File.extname(path).matches?(/\A\.[a-z][a-z0-9]*\z/i) ? path : "#{path.rstrip('/')}/index.html"
+    end
+
     def run : Nil
       Silth.env = "production" if Silth.development?
       # Static pages never read sessions back: an ephemeral key is fine when none is configured.
@@ -464,8 +472,7 @@ module Silth::Commands
         app.call(HTTP::Server::Context.new(request, response))
         response.close
         body = HTTP::Client::Response.from_io(IO::Memory.new(io.to_s)).body
-        file = !File.extname(path).empty? ? path : "#{path.rstrip('/')}/index.html"
-        file = "/index.html" if path == "/"
+        file = Export.output_file(path)
         dest = File.join(output, file)
         Dir.mkdir_p(File.dirname(dest))
         File.write(dest, body)

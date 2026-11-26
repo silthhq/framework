@@ -18,6 +18,16 @@ describe "Releases" do
   end
 end
 
+describe Silth::Commands::Export do
+  it "writes pages as index.html, files as they are" do
+    {"/" => "/index.html", "/docs" => "/docs/index.html", "/docs/0.1" => "/docs/0.1/index.html",
+     "/docs/0.1/intro" => "/docs/0.1/intro/index.html", "/llms.txt" => "/llms.txt",
+     "/docs/0.1/intro.md" => "/docs/0.1/intro.md", "/install.sh" => "/install.sh"}.each do |path, file|
+      Silth::Commands::Export.output_file(path).should eq(file)
+    end
+  end
+end
+
 describe Silth::Deprecation do
   it "warns once per message and raises with SILTH_DEPRECATIONS=raise" do
     Silth::Deprecation.reset
