@@ -278,6 +278,7 @@ module Silth
 
     # Runs a component request and returns the JSON response.
     def self.process(message : JSON::Any, user : Auth::Authenticatable?) : String
+      DB.reset_stickiness # each action reads from replicas until it writes
       name = message["c"].as_s
       component = LiveComponent.build(name) || raise BadRequest.new("Unknown live component #{name}")
       component.user = user

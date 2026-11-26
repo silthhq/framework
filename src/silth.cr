@@ -61,6 +61,7 @@ require "./silth/assets"
 
 # Data
 require "./silth/db"
+require "./silth/db/replicas"
 require "./silth/db/dialect"
 require "./silth/db/query_builder"
 require "./silth/db/drivers/sqlite"

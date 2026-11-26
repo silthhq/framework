@@ -403,6 +403,7 @@ module Silth
       job = Job.deserialize(envelope.job, envelope.payload)
       job.attempts = envelope.attempts
       job.job_id = envelope.id
+      DB.reset_stickiness # each job reads from replicas until it writes
       if driver.deferred? && (wait = throttle(envelope.queue, job))
         driver.release(envelope, wait, attempt: false)
         return
