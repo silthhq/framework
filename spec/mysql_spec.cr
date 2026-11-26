@@ -5,7 +5,8 @@ require "./spec_helper"
 # - Codec and RSA specs run everywhere (no server needed).
 # - Protocol specs run with `SILTH_TEST_DATABASE_URL=mysql://…`.
 # - Authentication specs need an account allowed to create users:
-#   `SILTH_TEST_MYSQL_ADMIN_URL=mysql://root:silth@127.0.0.1:53307/silth_test` (MySQL 8+).
+#   `SILTH_TEST_MYSQL_ADMIN_URL=mysql://root:silth@127.0.0.1:53307/silth_test` (MySQL 8+:
+#   caching_sha2_password, sha256_password; MariaDB: ed25519, parsec from 11.6).
 module MySQLSpec
   alias MySQL = Silth::DB::MySQL
   alias Codec = Silth::DB::MySQL::Codec
@@ -50,6 +51,15 @@ module MySQLSpec
     status = Process.run(Process.find_executable("openssl").not_nil!, args.to_a, output: output, error: error)
     raise "openssl #{args.first} failed: #{error}" unless status.success?
     output.to_slice
+  end
+
+  # Activates a MariaDB authentication plugin (INSTALL SONAME when it is not
+  # loaded yet); false on MySQL or when the server does not ship it.
+  def self.mariadb_plugin(admin : MySQL::Connection, name : String, soname : String) : Bool
+    return false unless admin.query("SELECT VERSION()", [] of Value).scalar.to_s.includes?("MariaDB")
+    status = -> { admin.query("SELECT plugin_status FROM information_schema.plugins WHERE plugin_name = ?", [name] of Value).scalar }
+    admin.exec_script("INSTALL SONAME '#{soname}'") rescue return false if status.call.nil?
+    status.call == "ACTIVE"
   end
 
   # A one-shot fake server: sends a `caching_sha2_password` handshake, reads the
@@ -220,10 +230,20 @@ describe "MySQL authentication (fake server)" do
     MySQLSpec.connect("mysql://app:secret@127.0.0.1:#{port}/app", allow_cleartext_password: true).close
   end
 
-  it "names the plugin when the server asks for one it does not support (MariaDB ed25519)" do
-    switch = Bytes[0xFE] + "client_ed25519\0".to_slice + Bytes.new(32, 7_u8)
+  it "names the plugin when the server asks for one it does not support" do
+    switch = Bytes[0xFE] + "auth_gssapi_client\0".to_slice + Bytes.new(20, 7_u8)
     port = MySQLSpec.fake_server([switch])
-    expect_raises(Silth::DB::ConnectionError, /plugin client_ed25519 is not supported/) do
+    expect_raises(Silth::DB::ConnectionError, /plugin auth_gssapi_client is not supported/) do
+      MySQLSpec.connect("mysql://app:secret@127.0.0.1:#{port}/app")
+    end
+  end
+
+  it "refuses a parsec salt that would take too long to derive" do
+    nonce = Bytes.new(32, 7_u8)
+    switch = Bytes[0xFE] + "parsec\0".to_slice + nonce
+    salt = Bytes[0x50, 30] + Bytes.new(18, 1_u8) # 'P', 1024 << 30 rounds
+    port = MySQLSpec.fake_server([switch, salt])
+    expect_raises(Silth::DB::ConnectionError, /iteration factor 30 is too large/) do
       MySQLSpec.connect("mysql://app:secret@127.0.0.1:#{port}/app")
     end
   end
@@ -411,6 +431,40 @@ if (admin_url = ENV["SILTH_TEST_MYSQL_ADMIN_URL"]?) && MySQLSpec.url
         admin.exec_script("DROP USER IF EXISTS 'silth_rsa'@'%'") rescue nil
         admin.close
         FileUtils.rm_rf(dir)
+      end
+    end
+
+    it "authenticates MariaDB ed25519 users" do
+      admin = MySQLSpec.connect(admin_url)
+      begin
+        MySQLSpec.mariadb_plugin(admin, "ed25519", "auth_ed25519") || pending!("the ed25519 plugin is a MariaDB plugin")
+        admin.exec_script("DROP USER IF EXISTS 'silth_ed'@'%'; CREATE USER 'silth_ed'@'%' IDENTIFIED VIA ed25519 USING PASSWORD('Ed-p4ss!')")
+        conn = MySQLSpec.connect(admin_url, user: "silth_ed", password: "Ed-p4ss!")
+        conn.query("SELECT CURRENT_USER()", [] of MySQLSpec::Value).scalar.should eq("silth_ed@%")
+        conn.close
+        expect_raises(Silth::DB::ConnectionError, /Access denied/) do
+          MySQLSpec.connect(admin_url, user: "silth_ed", password: "wrong")
+        end
+      ensure
+        admin.exec_script("DROP USER IF EXISTS 'silth_ed'@'%'") rescue nil
+        admin.close
+      end
+    end
+
+    it "authenticates MariaDB parsec users (11.6+)" do
+      admin = MySQLSpec.connect(admin_url)
+      begin
+        MySQLSpec.mariadb_plugin(admin, "parsec", "auth_parsec") || pending!("parsec needs MariaDB 11.6 or later")
+        admin.exec_script("DROP USER IF EXISTS 'silth_parsec'@'%'; CREATE USER 'silth_parsec'@'%' IDENTIFIED VIA parsec USING PASSWORD('Parsec-p4ss!')")
+        conn = MySQLSpec.connect(admin_url, user: "silth_parsec", password: "Parsec-p4ss!")
+        conn.query("SELECT CURRENT_USER()", [] of MySQLSpec::Value).scalar.should eq("silth_parsec@%")
+        conn.close
+        expect_raises(Silth::DB::ConnectionError, /Access denied/) do
+          MySQLSpec.connect(admin_url, user: "silth_parsec", password: "wrong")
+        end
+      ensure
+        admin.exec_script("DROP USER IF EXISTS 'silth_parsec'@'%'") rescue nil
+        admin.close
       end
     end
 

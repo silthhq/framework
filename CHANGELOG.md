@@ -31,6 +31,10 @@ The first release.
 - Observability: a profiler with a request timeline and a debug toolbar, mail previews, structured logging, OpenTelemetry export (OTLP).
 - Tooling: the `silth` CLI, generators and scaffolds, a development server with live reload, in-process HTTP testing and browser tests, a static site export, `silth deploy` (Docker over SSH), official Docker images, agent skills shipped with every app.
 
+### Database
+
+- MariaDB `ed25519` and `parsec` (11.6+) authentication, with an in-house Ed25519 signature: `ed25519` derives its key from SHA-512 of the password, which OpenSSL's EVP API cannot take.
+
 ### Fixed before the release
 
 - `DB#transaction` commits when the block returns early (`return`, `break`); it used to hand the connection back to the pool with the transaction still open.
