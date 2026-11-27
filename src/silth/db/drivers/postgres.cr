@@ -11,6 +11,11 @@ module Silth::DB::Postgres
   # Supports TLS (`?sslmode=disable|prefer|require|verify-full`), SCRAM-SHA-256, MD5 and
   # cleartext authentication, the extended query protocol with text parameters,
   # pgvector values and LISTEN/NOTIFY.
+  #
+  # Statements are prepared once per connection and reused (an LRU cache of
+  # `?statement_cache_size=256` statements): PostgreSQL parses and plans them
+  # once, and later executions send only `Bind`/`Execute`. Behind a pooler in
+  # transaction mode (PgBouncer before 1.21), add `?prepared_statements=false`.
   class Connection < Silth::DB::Connection
     BE = IO::ByteFormat::BigEndian
 
@@ -24,6 +29,16 @@ module Silth::DB::Postgres
     @dialect = Dialect::Postgres.new
     @vector_oid : Int32? = nil
     @mutex = Mutex.new
+    # Prepared statements: SQL => {name, result columns}, least recently used first.
+    @statements = {} of String => {String, Array(Column)}
+    @statement_counter = 0
+    @prepare = true
+    @statement_cache_size = 256
+
+    # :nodoc: a cached statement PostgreSQL no longer accepts (dropped, or its
+    # result columns changed with the schema): prepare it again.
+    class StaleStatement < Exception
+    end
 
     def initialize(url : URI)
       host = url.host.presence || "localhost"
@@ -33,6 +48,9 @@ module Silth::DB::Postgres
       database = url.path.lchop('/').presence || user
       params = url.query_params
       sslmode = params["sslmode"]? || (host == "localhost" || host == "127.0.0.1" ? "disable" : "prefer")
+      @prepare = params["prepared_statements"]? != "false"
+      @statement_cache_size = params["statement_cache_size"]?.try(&.to_i?) || 256
+      @prepare = false if @statement_cache_size <= 0
 
       socket = begin
         TCPSocket.new(host, port, connect_timeout: 5.seconds)
@@ -213,8 +231,14 @@ module Silth::DB::Postgres
       @mutex.synchronize { run_extended(sql, args) }
     end
 
+    # Number of statements prepared on this connection.
+    def prepared_statements : Int32
+      @statements.size
+    end
+
     def exec_script(sql : String) : Nil
       @mutex.synchronize do
+        forget_statements if sql.matches?(/\A\s*(DISCARD|DEALLOCATE)\s+ALL/i)
         message('Q') { |b| cstring(b, sql) }
         @io.flush
         error = nil
@@ -233,14 +257,103 @@ module Silth::DB::Postgres
     end
 
     private def run_extended(sql : String, args : Array(Value)) : ResultSet
-      message('P') do |b|
+      return run_unnamed(sql, args) unless @prepare
+      begin
+        run_prepared(sql, args)
+      rescue StaleStatement
+        run_prepared(sql, args)
+      end
+    end
+
+    # One round trip, nothing kept: Parse, Bind, Describe, Execute, Sync.
+    private def run_unnamed(sql : String, args : Array(Value)) : ResultSet
+      write_parse("", sql)
+      write_bind("", args)
+      message('D') do |b|
+        b.write_byte('P'.ord.to_u8)
         cstring(b, "")
+      end
+      write_execute_sync
+      result, error, _parsed, _status, _columns = read_results(nil)
+      raise build_error(error, sql) if error
+      result
+    end
+
+    # Reuses the statement prepared for *sql* (Bind, Execute, Sync), or prepares
+    # it in the same round trip (Parse, Describe, Bind, Execute, Sync).
+    private def run_prepared(sql : String, args : Array(Value)) : ResultSet
+      if cached = @statements.delete(sql)
+        @statements[sql] = cached # most recently used
+        name, columns = cached
+        write_bind(name, args)
+        write_execute_sync
+        result, error, _parsed, status, _columns = read_results(columns)
+        if error
+          if stale?(error)
+            @statements.delete(sql)
+            close_statement(name) if error[:code] != "26000"
+            raise StaleStatement.new if status == 'I' # outside a transaction: prepare again
+          end
+          raise build_error(error, sql)
+        end
+        return result
+      end
+
+      evicted = @statements.size >= @statement_cache_size ? @statements.first_key? : nil
+      name = "silth_#{@statement_counter += 1}"
+      if old = evicted
+        message('C') do |b|
+          b.write_byte('S'.ord.to_u8)
+          cstring(b, @statements.delete(old).not_nil![0])
+        end
+      end
+      write_parse(name, sql)
+      message('D') do |b|
+        b.write_byte('S'.ord.to_u8)
+        cstring(b, name)
+      end
+      write_bind(name, args)
+      write_execute_sync
+      result, error, parsed, _status, columns = read_results(nil)
+      @statements[sql] = {name, columns} if parsed
+      raise build_error(error, sql) if error
+      result
+    end
+
+    # 26000: the statement is gone (DISCARD ALL); 0A000: its result type changed (ALTER TABLE).
+    private def stale?(error) : Bool
+      error[:code] == "26000" || (error[:code] == "0A000" && error[:message].includes?("cached plan"))
+    end
+
+    private def close_statement(name : String) : Nil
+      message('C') do |b|
+        b.write_byte('S'.ord.to_u8)
+        cstring(b, name)
+      end
+      message('S') { }
+      @io.flush
+      loop do
+        type, _data = read_message
+        break if type == 'Z'
+      end
+    end
+
+    private def forget_statements : Nil
+      @statements.clear
+    end
+
+    private def write_parse(name : String, sql : String) : Nil
+      message('P') do |b|
+        cstring(b, name)
         cstring(b, sql)
         b.write_bytes(0_i16, BE)
       end
+    end
+
+    private def write_bind(statement : String, args : Array(Value)) : Nil
       message('B') do |b|
         cstring(b, "")
-        cstring(b, "")
+        cstring(b, statement)
         b.write_bytes(0_i16, BE)
         b.write_bytes(args.size.to_i16, BE)
         args.each do |arg|
@@ -254,24 +367,33 @@ module Silth::DB::Postgres
         end
         b.write_bytes(0_i16, BE)
       end
-      message('D') do |b|
-        b.write_byte('P'.ord.to_u8)
-        cstring(b, "")
-      end
+    end
+
+    private def write_execute_sync : Nil
       message('E') do |b|
         cstring(b, "")
         b.write_bytes(0_i32, BE)
       end
       message('S') { }
       @io.flush
+    end
 
-      columns = [] of Column
+    # Reads until ReadyForQuery. *columns* are the known result columns of a
+    # prepared statement (its RowDescription came when it was described).
+    # Returns the result, the first error, whether a Parse succeeded and the
+    # transaction status ('I' idle, 'T' in a transaction, 'E' failed one).
+    private def read_results(columns : Array(Column)?) : {ResultSet, NamedTuple(code: String, message: String, detail: String?, hint: String?)?, Bool, Char, Array(Column)}
+      columns ||= [] of Column
       rows = [] of Array(Value)
       affected = 0_i64
       error = nil
+      parsed = false
+      status = 'I'
       loop do
         type, data = read_message
         case type
+        when '1'
+          parsed = true
         when 'T'
           columns = parse_row_description(data)
         when 'D'
@@ -280,19 +402,17 @@ module Silth::DB::Postgres
           tag = String.new(data[0, data.size - 1])
           affected = tag.split(' ').last.to_i64? || 0_i64
         when 'E'
-          error = parse_error(data)
+          error ||= parse_error(data)
         when 'A'
           queue_notification(data)
         when 'Z'
+          status = data.empty? ? 'I' : data[0].unsafe_chr
           break
         end
       end
-      if e = error
-        raise build_error(e, sql)
-      end
       result = ResultSet.new(columns.map(&.name), rows)
       result.rows_affected = affected
-      result
+      {result, error, parsed, status, columns}
     end
 
     # Blocks until a NOTIFY arrives (after `LISTEN channel`).

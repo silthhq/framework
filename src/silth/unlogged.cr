@@ -62,16 +62,16 @@ module Silth
     end
 
     def write(key : String, value : String, ttl : Time::Span?) : Nil
-      db.query("INSERT INTO #{q} (key, value, expires_at) VALUES (?, ?, ?) ON CONFLICT (key) DO UPDATE " \
-               "SET value = EXCLUDED.value, expires_at = EXCLUDED.expires_at", [key, value, expires(ttl)] of DB::Value)
+      db.query("INSERT INTO #{q} (key, value, expires_at) VALUES (?, ?, #{EXPIRES}) ON CONFLICT (key) DO UPDATE " \
+               "SET value = EXCLUDED.value, expires_at = EXCLUDED.expires_at", [key, value, seconds(ttl)] of DB::Value)
       prune
     end
 
     # Sets the key unless a live value exists (an expired one is replaced).
     def add(key : String, value : String, ttl : Time::Span?) : Bool
-      result = db.query("INSERT INTO #{q} AS c (key, value, expires_at) VALUES (?, ?, ?) ON CONFLICT (key) DO UPDATE " \
+      result = db.query("INSERT INTO #{q} AS c (key, value, expires_at) VALUES (?, ?, #{EXPIRES}) ON CONFLICT (key) DO UPDATE " \
                         "SET value = EXCLUDED.value, expires_at = EXCLUDED.expires_at " \
-                        "WHERE c.expires_at IS NOT NULL AND c.expires_at <= now() RETURNING key", [key, value, expires(ttl)] of DB::Value)
+                        "WHERE c.expires_at IS NOT NULL AND c.expires_at <= now() RETURNING key", [key, value, seconds(ttl)] of DB::Value)
       !result.empty?
     end
 
@@ -81,19 +81,23 @@ module Silth
 
     # Atomic counter; *ttl* applies when the key is created (or had expired).
     def increment(key : String, by : Int64 = 1, ttl : Time::Span? = nil) : Int64
-      sql = "INSERT INTO #{q} AS c (key, value, expires_at) VALUES (?, ?, ?) ON CONFLICT (key) DO UPDATE SET " \
+      sql = "INSERT INTO #{q} AS c (key, value, expires_at) VALUES (?, ?, #{EXPIRES}) ON CONFLICT (key) DO UPDATE SET " \
             "value = (CASE WHEN c.expires_at IS NOT NULL AND c.expires_at <= now() THEN 0 ELSE c.value::bigint END + ?)::text, " \
             "expires_at = CASE WHEN c.expires_at IS NOT NULL AND c.expires_at <= now() THEN EXCLUDED.expires_at ELSE c.expires_at END " \
             "RETURNING value"
-      db.scalar(sql, [key, by.to_s, expires(ttl), by] of DB::Value).to_s.to_i64
+      db.scalar(sql, [key, by.to_s, seconds(ttl), by] of DB::Value).to_s.to_i64
     end
 
     def clear : Nil
       db.query("TRUNCATE #{q}")
     end
 
-    private def expires(ttl : Time::Span?) : DB::Value
-      ttl.try { |t| Time.utc + t }
+    # Expiry computed by the database (`now()` is what reads compare to): the
+    # application's clock may differ from the server's.
+    EXPIRES = "now() + ?::float8 * interval '1 second'"
+
+    private def seconds(ttl : Time::Span?) : DB::Value
+      ttl.try(&.total_seconds)
     end
 
     # Expired rows are removed every 500 writes.

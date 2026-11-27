@@ -33,31 +33,19 @@ module Silth
     end
 
     def self.format(time : Time, io : IO) : Nil
-      utc = time.to_utc
-      Time::Format::RFC_3339.format(utc, io, fraction_digits: @@digits || auto_digits(utc.nanosecond))
+      JSONWriter.time(io, time, @@digits)
     end
 
     def self.format(time : Time) : String
       String.build { |io| format(time, io) }
     end
 
-    private def self.auto_digits(nanosecond : Int32) : Int32
-      if nanosecond == 0
-        0
-      elsif nanosecond % 1_000_000 == 0
-        3
-      elsif nanosecond % 1_000 == 0
-        6
-      else
-        9
-      end
-    end
   end
 end
 
 struct Time
   # RFC 3339 in UTC, with the precision set by `Silth::JSONTime`.
   def to_json(json : JSON::Builder) : Nil
-    json.string { |io| Silth::JSONTime.format(self, io) }
+    json.__silth_raw { |io| Silth::JSONWriter.value(io, self) }
   end
 end

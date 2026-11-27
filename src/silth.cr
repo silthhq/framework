@@ -38,6 +38,7 @@ require "./silth/support/crypto"
 require "./silth/support/decimal"
 require "./silth/support/date"
 require "./silth/support/json_time"
+require "./silth/support/json_writer"
 
 # `Decimal` and `Date` at the top level (`column total : Decimal`), unless the
 # application defined constants with these names before requiring Silth.

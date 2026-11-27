@@ -1118,22 +1118,38 @@ module Silth
 
     # --- serialization -------------------------------------------------------------------
 
+    # The visible columns (not `hidden: true`) and the extra selected values, as a JSON object.
     def to_json(json : JSON::Builder) : Nil
-      json.object do
-        {% begin %}
-          {% for iv in @type.instance_vars %}
-            {% if (a = iv.annotation(::Silth::Model::Column)) && !a[:hidden] %}
-              json.field {{a[:name]}} do
-                %v = @{{iv.name}}
-                ::Silth::ORM::Cast.write_json(json, %v)
-              end
-            {% end %}
+      json.__silth_raw { |io| __write_json(io) }
+    end
+
+    def to_json(io : IO) : Nil
+      __write_json(io)
+    end
+
+    # :nodoc: writes the object directly: keys are literals, values typed.
+    def __write_json(io : IO) : Nil
+      io << '{'
+      {% begin %}
+        {% count = 0 %}
+        {% for iv in @type.instance_vars %}
+          {% if (a = iv.annotation(::Silth::Model::Column)) && !a[:hidden] %}
+            io << {{(count > 0 ? "," : "") + "\"" + a[:name] + "\":"}}
+            ::Silth::JSONWriter.value(io, @{{iv.name}})
+            {% count = count + 1 %}
           {% end %}
         {% end %}
+        first = {{count == 0}}
         @__extra.try &.each do |k, v|
-          json.field(k) { ::Silth::ORM::Cast.write_json(json, v) } unless k.starts_with?("__")
+          next if k.starts_with?("__")
+          io << ',' unless first
+          first = false
+          ::Silth::JSONWriter.string(io, k)
+          io << ':'
+          ::Silth::JSONWriter.value(io, v)
         end
-      end
+      {% end %}
+      io << '}'
     end
 
     def to_h : Hash(String, DB::Value)
