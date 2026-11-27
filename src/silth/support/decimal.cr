@@ -9,13 +9,13 @@ module Silth
   #
   # ```
   # price = Decimal.new("19.90")
-  # total = price * 3                    # => 59.70 (the scales add up: 2 + 0)
+  # total = price * 3                            # => 59.70 (the scales add up: 2 + 0)
   # vat = (total * Decimal.new("0.20")).round(2) # => 11.94 (half to even)
-  # (total + vat).to_s                   # => "71.64"
-  # Decimal.new("10") / Decimal.new("4") # => 2.5
-  # Decimal.new("1.005").round(2, :ties_away) # => 1.01
-  # Decimal.new("12.345").to_fixed(2)    # => "12.35", `truncate(2)` gives 12.34
-  # {"total" => total}.to_json           # => {"total":"59.70"}
+  # (total + vat).to_s                           # => "71.64"
+  # Decimal.new("10") / Decimal.new("4")         # => 2.5
+  # Decimal.new("1.005").round(2, :ties_away)    # => 1.01
+  # Decimal.new("12.345").to_fixed(2)            # => "12.35", `truncate(2)` gives 12.34
+  # {"total" => total}.to_json                   # => {"total":"59.70"}
   # ```
   #
   # Arithmetic is exact, except division: a quotient that does not terminate
@@ -123,9 +123,9 @@ module Silth
     # Exact when the quotient terminates within 28 decimal places; rounded half to even otherwise.
     #
     # ```
-    # Decimal.new("1.00") / 2  # => 0.50
-    # Decimal.new("10") / 4    # => 2.5
-    # Decimal.new("1") / 3     # => 0.3333333333333333333333333333
+    # Decimal.new("1.00") / 2 # => 0.50
+    # Decimal.new("10") / 4   # => 2.5
+    # Decimal.new("1") / 3    # => 0.3333333333333333333333333333
     # ```
     def /(other : Decimal) : Decimal
       raise DivisionByZeroError.new if other.zero?

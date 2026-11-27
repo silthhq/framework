@@ -3,14 +3,14 @@ lib LibSQLite3
   type Sqlite3 = Void*
   type Stmt = Void*
 
-  OK       =   0
-  ROW      = 100
-  DONE     = 101
-  INTEGER  =   1
-  FLOAT    =   2
-  TEXT     =   3
-  BLOB     =   4
-  NULL     =   5
+  OK      =   0
+  ROW     = 100
+  DONE    = 101
+  INTEGER =   1
+  FLOAT   =   2
+  TEXT    =   3
+  BLOB    =   4
+  NULL    =   5
 
   OPEN_READWRITE = 0x00000002
   OPEN_CREATE    = 0x00000004

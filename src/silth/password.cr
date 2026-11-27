@@ -14,9 +14,9 @@ module Silth
   # ```
   #
   # ```
-  # digest = Silth::Password.hash("secret")    # "$2b$12$…" or "$argon2id$v=19$…"
-  # Silth::Password.verify("secret", digest)   # => true, whatever the algorithm
-  # Silth::Password.needs_rehash?(digest)      # => true when made with other settings
+  # digest = Silth::Password.hash("secret")  # "$2b$12$…" or "$argon2id$v=19$…"
+  # Silth::Password.verify("secret", digest) # => true, whatever the algorithm
+  # Silth::Password.needs_rehash?(digest)    # => true when made with other settings
   # ```
   #
   # `Auth::Authenticatable#authenticate?` uses it, and a successful login

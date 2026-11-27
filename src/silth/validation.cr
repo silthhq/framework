@@ -63,12 +63,12 @@ module Silth
 
     def self.blank?(value) : Bool
       case value
-      when Nil    then true
-      when String then value.strip.empty?
-      when Array  then value.empty?
-      when Hash   then value.empty?
+      when Nil       then true
+      when String    then value.strip.empty?
+      when Array     then value.empty?
+      when Hash      then value.empty?
       when JSON::Any then value.raw.nil? || (value.as_s? || "x").strip.empty?
-      else             false
+      else                false
       end
     end
 
@@ -83,8 +83,8 @@ module Silth
     def self.number(value) : Float64?
       case value
       when Int32, Int64, Float32, Float64, ::Silth::Decimal then value.to_f64
-      when String then value.to_f64?
-      else             nil
+      when String                                           then value.to_f64?
+      else                                                       nil
       end
     end
   end

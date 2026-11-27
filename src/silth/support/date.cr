@@ -7,12 +7,12 @@ module Silth
   #
   # ```
   # due = Date.new(2026, 11, 27)
-  # due + 30                    # => 2026-12-27
-  # due.shift(months: 1)        # => 2026-12-27 (end of month clamped: Jan 31 + 1 month = Feb 28)
+  # due + 30                                 # => 2026-12-27
+  # due.shift(months: 1)                     # => 2026-12-27 (end of month clamped: Jan 31 + 1 month = Feb 28)
   # Date.parse("2026-02-01").at_end_of_month # => 2026-02-28
-  # Date.today < due            # comparable
-  # (Date.new(2026, 12, 25) - due) # => 28 (days)
-  # (due..due + 6).each { |day| }  # ranges of days
+  # Date.today < due                         # comparable
+  # (Date.new(2026, 12, 25) - due)           # => 28 (days)
+  # (due..due + 6).each { |day| }            # ranges of days
   # ```
   struct Date
     include Comparable(Date)

@@ -7,12 +7,12 @@ module Silth::ORM
 
     def cast(v : Value, t : String.class) : String?
       case v
-      when Nil    then nil
-      when String then v
-      when Bytes  then String.new(v)
-      when Time   then v.to_rfc3339
+      when Nil       then nil
+      when String    then v
+      when Bytes     then String.new(v)
+      when Time      then v.to_rfc3339
       when JSON::Any then v.as_s? || v.to_json
-      else             v.to_s
+      else                v.to_s
       end
     end
 
@@ -31,22 +31,22 @@ module Silth::ORM
 
     def cast(v : Value, t : Bool.class) : Bool?
       case v
-      when Nil    then nil
-      when Bool   then v
+      when Nil          then nil
+      when Bool         then v
       when Int32, Int64 then v != 0
-      when String then v.empty? ? nil : %w(1 t true on yes).includes?(v.downcase)
-      else             raise CastError.new(v.to_s, "Bool")
+      when String       then v.empty? ? nil : %w(1 t true on yes).includes?(v.downcase)
+      else                   raise CastError.new(v.to_s, "Bool")
       end
     end
 
     def cast(v : Value, t : Time.class) : Time?
       case v
-      when Nil    then nil
-      when Time   then v
+      when Nil           then nil
+      when Time          then v
       when ::Silth::Date then v.time
-      when String then v.strip.empty? ? nil : DB.parse_time(v)
-      when Int32, Int64 then Time.unix(v.to_i64)
-      else             raise CastError.new(v.to_s, "Time")
+      when String        then v.strip.empty? ? nil : DB.parse_time(v)
+      when Int32, Int64  then Time.unix(v.to_i64)
+      else                    raise CastError.new(v.to_s, "Time")
       end
     end
 
@@ -169,13 +169,13 @@ module Silth::ORM
     def to_db(value) : Value
       case value
       when Nil, Bool, Int32, Int64, Float32, Float64, String, Bytes, Time, JSON::Any then value
-      when ::Silth::Decimal, ::Silth::Date                                       then value
-      when BigDecimal                                                             then ::Silth::Decimal.new(value)
+      when ::Silth::Decimal, ::Silth::Date                                           then value
+      when BigDecimal                                                                then ::Silth::Decimal.new(value)
       when Array(String), Array(Int32), Array(Int64), Array(Float32), Array(Float64) then value
-      when Int8, Int16, UInt8, UInt16 then value.to_i32
-      when UInt32, UInt64            then value.to_i64
-      when Enum                      then value.value.to_i64
-      when UUID                      then value.to_s
+      when Int8, Int16, UInt8, UInt16                                                then value.to_i32
+      when UInt32, UInt64                                                            then value.to_i64
+      when Enum                                                                      then value.value.to_i64
+      when UUID                                                                      then value.to_s
       else
         if value.responds_to?(:to_db)
           value.to_db

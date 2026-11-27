@@ -36,7 +36,7 @@ module Silth
   #   column title : String
   #   column body : String?
   #   column published : Bool = false
-  #   column embedding : Array(Float32)?   # pgvector
+  #   column embedding : Array(Float32)? # pgvector
   #   timestamps
   #
   #   belongs_to user : User
@@ -273,8 +273,8 @@ module Silth
     # `belongs_to user : User` declares `user_id : Int64` and a lazy `user` reader.
     #
     # ```
-    # belongs_to post : Post, counter_cache: true             # keeps posts.comments_count up to date
-    # belongs_to commentable, polymorphic: true               # commentable_type + commentable_id, returns Silth::Model?
+    # belongs_to post : Post, counter_cache: true              # keeps posts.comments_count up to date
+    # belongs_to commentable, polymorphic: true                # commentable_type + commentable_id, returns Silth::Model?
     # belongs_to commentable : Post | Video, polymorphic: true # only these classes (still Silth::Model?)
     # belongs_to imageable : User, polymorphic: true           # one class: the reader returns User?
     # ```

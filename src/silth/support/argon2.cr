@@ -5,7 +5,7 @@ module Silth
   #
   # ```
   # Silth::Blake2b.digest("abc".to_slice).hexstring # => "ba80a53f981c4d0d…" (64 bytes)
-  # Silth::Blake2b.digest("abc".to_slice, 32)        # 32 bytes
+  # Silth::Blake2b.digest("abc".to_slice, 32)       # 32 bytes
   # ```
   class Blake2b
     IV = StaticArray[
@@ -109,17 +109,17 @@ module Silth
   # made by Rust's `argon2`, PHP's `password_hash` or libsodium verify here.
   #
   # ```
-  # digest = Silth::Argon2.hash("secret")              # m=19456 KiB, t=2, p=1 (OWASP)
-  # Silth::Argon2.verify("secret", digest)            # => true
+  # digest = Silth::Argon2.hash("secret")  # m=19456 KiB, t=2, p=1 (OWASP)
+  # Silth::Argon2.verify("secret", digest) # => true
   # Silth::Argon2.hash("secret", memory: 65536, iterations: 3, parallelism: 4)
   # ```
   #
   # Most apps go through `Silth::Password`, which picks bcrypt or Argon2id
   # from the configuration and recognizes both.
   module Argon2
-    VERSION = 0x13
-    BLOCK_WORDS = 128 # 1 KiB blocks of 64-bit words
-    SYNC_POINTS = 4
+    VERSION     = 0x13
+    BLOCK_WORDS =  128 # 1 KiB blocks of 64-bit words
+    SYNC_POINTS =    4
 
     enum Type
       D  = 0

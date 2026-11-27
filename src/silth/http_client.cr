@@ -33,6 +33,7 @@ module Silth
     record File, filename : String, content : Bytes | String, content_type : String = "application/octet-stream"
 
     alias Part = String | File
+
     class Error < Silth::Error
       getter response : Response
 

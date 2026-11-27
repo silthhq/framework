@@ -203,8 +203,8 @@ module Silth
         if (header = ctx.header("Authorization")) && header.starts_with?("Bearer ")
           raw = header.lchop("Bearer ").strip
           if raw.count('.') == 2 && (secret = Silth.config.string?("auth.jwt_secret"))
-            if claims = JWT.decode?(raw, secret)
-              ctx.auth_user = Auth.find_user(claims["sub"].to_s, claims["typ"]?.try(&.as_s?))
+            if (claims = JWT.decode?(raw, secret)) && (subject = claims["sub"]?)
+              ctx.auth_user = Auth.find_user(subject.to_s, claims["typ"]?.try(&.as_s?))
             end
           elsif token = AccessToken.find_valid(raw)
             ctx.auth_token = token
@@ -408,7 +408,7 @@ module Silth
   # ```
   # token = Silth::JWT.encode({"sub" => user.auth_id}, secret, expires_in: 1.hour)
   # token = Silth::JWT.encode(claims, secret, algorithm: "HS512")
-  # claims = Silth::JWT.decode(token, secret) # raises Silth::JWT::Invalid
+  # claims = Silth::JWT.decode(token, secret)                        # raises Silth::JWT::Invalid
   # claims = Silth::JWT.decode(token, secret, algorithms: ["HS512"]) # only accept HS512
   # ```
   #

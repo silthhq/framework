@@ -111,6 +111,7 @@ module Silth
       abstract def close : Nil
       abstract def closed? : Bool
       abstract def dialect : Dialect
+
       property? broken = false
     end
 
@@ -198,7 +199,8 @@ module Silth
             else
               select
               when c = current.channel.receive then c
-              else                                  nil
+              else
+                nil
               end
             end
           end
@@ -558,9 +560,9 @@ module Silth
 
     def self.open_connection(url : URI) : Connection
       case url.scheme
-      when "sqlite3", "sqlite"                 then SQLite::Connection.new(url)
-      when "postgres", "postgresql", "pg"      then Postgres::Connection.new(url)
-      when "mysql", "mariadb"                  then MySQL::Connection.new(url)
+      when "sqlite3", "sqlite"            then SQLite::Connection.new(url)
+      when "postgres", "postgresql", "pg" then Postgres::Connection.new(url)
+      when "mysql", "mariadb"             then MySQL::Connection.new(url)
       else
         raise ConnectionError.new("Unsupported database scheme '#{url.scheme}' (use postgres://, mysql:// or sqlite3://)")
       end
@@ -569,17 +571,17 @@ module Silth
     # Converts any supported Crystal value into a `DB::Value`.
     def self.to_value(v) : Value
       case v
-      when Value       then v
+      when Value                      then v
       when Int8, Int16, UInt8, UInt16 then v.to_i32
-      when UInt32, UInt64 then v.to_i64
-      when Enum        then v.value.to_i64
-      when Symbol      then v.to_s
-      when Char        then v.to_s
-      when UUID        then v.to_s
-      when BigDecimal  then ::Silth::Decimal.new(v)
-      when BigInt      then ::Silth::Decimal.new(v)
-      when Array       then JSON.parse(v.to_json)
-      when Hash, NamedTuple then JSON.parse(v.to_json)
+      when UInt32, UInt64             then v.to_i64
+      when Enum                       then v.value.to_i64
+      when Symbol                     then v.to_s
+      when Char                       then v.to_s
+      when UUID                       then v.to_s
+      when BigDecimal                 then ::Silth::Decimal.new(v)
+      when BigInt                     then ::Silth::Decimal.new(v)
+      when Array                      then JSON.parse(v.to_json)
+      when Hash, NamedTuple           then JSON.parse(v.to_json)
       else
         if v.responds_to?(:to_db_value)
           v.to_db_value

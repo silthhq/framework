@@ -22,7 +22,7 @@ Each release publishes the `silth` CLI for Linux (`amd64`, `arm64`) and macOS wi
 - Argon2id password hashing in pure Crystal (`Silth::Argon2`, with BLAKE2b), and `Silth::Password`: `auth.password_algorithm: bcrypt | argon2id` in `config/auth.yml`, both always verified (PHC strings from any implementation), and a successful login re-hashes a password stored with other settings (`auth.rehash_on_login`).
 - JWT signed with HS384 and HS512 (`algorithm:` on `Silth::JWT.encode`, `algorithms:` on `decode`, default `auth.jwt_algorithm`).
 - `Silth::HTTPClient`: `multipart:` bodies with fields and files (`HTTPClient::File`), binary request bodies, `response.bytes`.
-- `server.workers` (`auto`, a number, `WEB_CONCURRENCY`, `bin/<app> server --workers`): supervised worker processes sharing the port with `SO_REUSEPORT`, restarted when they die, stopped gracefully. New apps use `auto` in production.
+- `server.workers` (`auto`, a number, `WEB_CONCURRENCY`, `bin/cli server --workers`): supervised worker processes sharing the port with `SO_REUSEPORT`, restarted when they die, stopped gracefully. New apps use `auto` in production.
 - `silth check`: type-checks the application without generating code (about half the time of a build), `--spec` includes the specs.
 - PostgreSQL: statements are prepared once per connection and reused (`?statement_cache_size=256`, `?prepared_statements=false` for PgBouncer in transaction mode); a statement made stale by a schema change is prepared again.
 - New apps get a documented `config/auth.yml`.

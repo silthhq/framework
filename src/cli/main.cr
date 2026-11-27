@@ -11,11 +11,11 @@ module Silth::Global
   def self.run(args : Array(String)) : Int32
     command = args.first? || "help"
     case command
-    when "new"                       then NewApp.run(args[1..])
-    when "serve", "s"                then DevServer.new(args[1..]).run
-    when "build"                     then build(args[1..])
-    when "check"                     then check(args[1..])
-    when "test"                      then exec_crystal(["spec"] + args[1..], {"SILTH_ENV" => "test"})
+    when "new"        then NewApp.run(args[1..])
+    when "serve", "s" then DevServer.new(args[1..]).run
+    when "build"      then build(args[1..])
+    when "check"      then check(args[1..])
+    when "test"       then exec_crystal(["spec"] + args[1..], {"SILTH_ENV" => "test"})
     when "version", "--version", "-v"
       puts "Silth #{Silth::VERSION} (Crystal #{Crystal::VERSION})"
       0

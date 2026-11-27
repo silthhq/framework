@@ -723,20 +723,20 @@ module Silth::DB
 
   def self.as_i64?(value : Value) : Int64?
     case value
-    when Int32, Int64 then value.to_i64
+    when Int32, Int64     then value.to_i64
     when Float32, Float64 then value.to_i64
     when ::Silth::Decimal then value.to_i64
-    when String then value.to_i64?
-    when Bool then value ? 1_i64 : 0_i64
-    else nil
+    when String           then value.to_i64?
+    when Bool             then value ? 1_i64 : 0_i64
+    else                       nil
     end
   end
 
   def self.as_f64?(value : Value) : Float64?
     case value
     when Int32, Int64, Float32, Float64, ::Silth::Decimal then value.to_f64
-    when String then value.to_f64?
-    else nil
+    when String                                           then value.to_f64?
+    else                                                       nil
     end
   end
 

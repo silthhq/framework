@@ -69,24 +69,24 @@ module Silth
 
       def migration_line : String
         case @type
-        when "references"                      then "t.references :#{@name}#{@nullable ? ", null: true, on_delete: :nullify" : ""}"
-        when "text"                            then "t.text :#{@name}#{null_opt}"
-        when "integer"                         then "t.integer :#{@name}#{null_opt}"
-        when "smallint"                        then "t.smallint :#{@name}#{null_opt}"
-        when "bigint"                          then "t.bigint :#{@name}#{null_opt}"
-        when "float"                           then "t.float :#{@name}#{null_opt}"
+        when "references" then "t.references :#{@name}#{@nullable ? ", null: true, on_delete: :nullify" : ""}"
+        when "text"       then "t.text :#{@name}#{null_opt}"
+        when "integer"    then "t.integer :#{@name}#{null_opt}"
+        when "smallint"   then "t.smallint :#{@name}#{null_opt}"
+        when "bigint"     then "t.bigint :#{@name}#{null_opt}"
+        when "float"      then "t.float :#{@name}#{null_opt}"
         when "decimal"
           precision, scale = (@option || "10,2").split(',').map(&.strip.to_i)
           "t.decimal :#{@name}, precision: #{precision}, scale: #{scale || 0}#{null_opt}"
-        when "boolean"                         then "t.boolean :#{@name}, null: false, default: false"
-        when "timestamp"                       then "t.timestamp :#{@name}"
-        when "date"                            then "t.date :#{@name}#{null_opt}"
-        when "time"                            then "t.time :#{@name}"
-        when "json"                            then "t.jsonb :#{@name}"
-        when "citext"                          then "t.citext :#{@name}#{null_opt}"
-        when "uuid"                            then "t.uuid :#{@name}#{null_opt}"
-        when "vector"                          then "t.vector :#{@name}, #{@option || 1536}"
-        else                                        "t.string :#{@name}#{null_opt}"
+        when "boolean"   then "t.boolean :#{@name}, null: false, default: false"
+        when "timestamp" then "t.timestamp :#{@name}"
+        when "date"      then "t.date :#{@name}#{null_opt}"
+        when "time"      then "t.time :#{@name}"
+        when "json"      then "t.jsonb :#{@name}"
+        when "citext"    then "t.citext :#{@name}#{null_opt}"
+        when "uuid"      then "t.uuid :#{@name}#{null_opt}"
+        when "vector"    then "t.vector :#{@name}, #{@option || 1536}"
+        else                  "t.string :#{@name}#{null_opt}"
         end
       end
 
@@ -96,15 +96,15 @@ module Silth
 
       def form_input : String
         case @type
-        when "text"                      then "f.text_area :#{column_name}"
+        when "text"                                        then "f.text_area :#{column_name}"
         when "integer", "bigint", "smallint", "references" then "f.number_field :#{column_name}"
-        when "float", "decimal"          then "f.number_field :#{column_name}, step: \"any\""
-        when "boolean"                   then "f.check_box :#{column_name}"
-        when "timestamp"                 then "f.datetime_field :#{column_name}"
-        when "date"                      then "f.date_field :#{column_name}"
-        when "email"                     then "f.email_field :#{column_name}"
-        when "url"                       then "f.url_field :#{column_name}"
-        else                                  "f.text_field :#{column_name}"
+        when "float", "decimal"                            then "f.number_field :#{column_name}, step: \"any\""
+        when "boolean"                                     then "f.check_box :#{column_name}"
+        when "timestamp"                                   then "f.datetime_field :#{column_name}"
+        when "date"                                        then "f.date_field :#{column_name}"
+        when "email"                                       then "f.email_field :#{column_name}"
+        when "url"                                         then "f.url_field :#{column_name}"
+        else                                                    "f.text_field :#{column_name}"
         end
       end
 
@@ -451,19 +451,19 @@ module Silth
       def factory : Nil
         attrs = @fields.reject(&.reference?).select(&.displayable?).map do |f|
           value = case f.type
-                  when "text"                             then "fake.paragraph"
-                  when "integer"                          then "fake.number(1, 100)"
-                  when "bigint"                           then "fake.number(1, 100).to_i64"
-                  when "smallint"                         then "fake.number(1, 100).to_i16"
-                  when "float"                            then "fake.price"
-                  when "decimal"                          then "Decimal.new(fake.price.round(2))"
-                  when "boolean"                          then "fake.bool"
-                  when "timestamp"                        then "fake.date"
-                  when "date"                             then "Date.new(fake.date)"
-                  when "uuid"                             then "UUID.random.to_s"
-                  when "email"                            then "fake.email"
-                  when "url"                              then "fake.url"
-                  else                                         f.name.includes?("name") ? "fake.name" : (f.name.includes?("email") ? "fake.email" : "fake.title")
+                  when "text"      then "fake.paragraph"
+                  when "integer"   then "fake.number(1, 100)"
+                  when "bigint"    then "fake.number(1, 100).to_i64"
+                  when "smallint"  then "fake.number(1, 100).to_i16"
+                  when "float"     then "fake.price"
+                  when "decimal"   then "Decimal.new(fake.price.round(2))"
+                  when "boolean"   then "fake.bool"
+                  when "timestamp" then "fake.date"
+                  when "date"      then "Date.new(fake.date)"
+                  when "uuid"      then "UUID.random.to_s"
+                  when "email"     then "fake.email"
+                  when "url"       then "fake.url"
+                  else                  f.name.includes?("name") ? "fake.name" : (f.name.includes?("email") ? "fake.email" : "fake.title")
                   end
           "#{f.column_name}: #{value}"
         end
@@ -482,12 +482,12 @@ module Silth
     # An example value for a prop of *type* in a generated preview (nil: leave it out).
     def self.sample_value(type : String) : String?
       case type.rchop("?").sub(/ = .*/, "")
-      when "String"          then type.ends_with?("?") ? nil : %("Example")
-      when "Int32", "Int64"  then type.ends_with?("?") ? nil : "1"
-      when "Float64"         then type.ends_with?("?") ? nil : "1.5"
-      when "Decimal"         then type.ends_with?("?") ? nil : %(Decimal.new("9.99"))
-      when "Bool"            then "true"
-      else                        nil
+      when "String"         then type.ends_with?("?") ? nil : %("Example")
+      when "Int32", "Int64" then type.ends_with?("?") ? nil : "1"
+      when "Float64"        then type.ends_with?("?") ? nil : "1.5"
+      when "Decimal"        then type.ends_with?("?") ? nil : %(Decimal.new("9.99"))
+      when "Bool"           then "true"
+      else                       nil
       end
     end
 

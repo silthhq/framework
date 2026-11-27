@@ -448,14 +448,14 @@ module Silth::DB::Postgres
 
     private def encode(value : Value) : String
       case value
-      when Bool          then value ? "t" : "f"
-      when Time          then value.to_utc.to_s("%Y-%m-%d %H:%M:%S.%6N+00")
-      when Bytes         then "\\x" + value.hexstring
-      when JSON::Any     then value.to_json
+      when Bool           then value ? "t" : "f"
+      when Time           then value.to_utc.to_s("%Y-%m-%d %H:%M:%S.%6N+00")
+      when Bytes          then "\\x" + value.hexstring
+      when JSON::Any      then value.to_json
       when Array(Float32) then "[" + value.join(',') + "]"
-      when Array(String) then "{" + value.map { |s| %("#{s.gsub("\\", "\\\\").gsub('"', "\\\"")}") }.join(',') + "}"
-      when Array         then "{" + value.join(',') + "}"
-      else                    value.to_s
+      when Array(String)  then "{" + value.map { |s| %("#{s.gsub("\\", "\\\\").gsub('"', "\\\"")}") }.join(',') + "}"
+      when Array          then "{" + value.join(',') + "}"
+      else                     value.to_s
       end
     end
 
@@ -488,21 +488,21 @@ module Silth::DB::Postgres
 
     private def decode(text : String, oid : Int32) : Value
       case oid
-      when 16                  then text == "t"
-      when 20, 26              then text.to_i64
-      when 21, 23              then text.to_i32
-      when 700                 then text.to_f32
-      when 701                 then text.to_f64
-      when 1700                then ::Silth::Decimal.parse?(text) || text # NaN, Infinity stay text
-      when 114, 3802           then JSON.parse(text)
-      when 17                  then text.starts_with?("\\x") ? text[2..].hexbytes : text.to_slice.dup
-      when 1082                then ::Silth::Date.parse?(text) || text      # infinity, BC dates stay text
-      when 1114, 1184          then DB.parse_time(text)
-      when 1000                then parse_array(text).map { |v| v == "t" }.map(&.to_s)
-      when 1005, 1007          then parse_array(text).map(&.to_i32)
-      when 1016                then parse_array(text).map(&.to_i64)
-      when 1021                then parse_array(text).map(&.to_f32)
-      when 1022                then parse_array(text).map(&.to_f64)
+      when 16                     then text == "t"
+      when 20, 26                 then text.to_i64
+      when 21, 23                 then text.to_i32
+      when 700                    then text.to_f32
+      when 701                    then text.to_f64
+      when 1700                   then ::Silth::Decimal.parse?(text) || text # NaN, Infinity stay text
+      when 114, 3802              then JSON.parse(text)
+      when 17                     then text.starts_with?("\\x") ? text[2..].hexbytes : text.to_slice.dup
+      when 1082                   then ::Silth::Date.parse?(text) || text # infinity, BC dates stay text
+      when 1114, 1184             then DB.parse_time(text)
+      when 1000                   then parse_array(text).map { |v| v == "t" }.map(&.to_s)
+      when 1005, 1007             then parse_array(text).map(&.to_i32)
+      when 1016                   then parse_array(text).map(&.to_i64)
+      when 1021                   then parse_array(text).map(&.to_f32)
+      when 1022                   then parse_array(text).map(&.to_f64)
       when 1009, 1015, 1014, 2951 then parse_array(text)
       else
         if oid == @vector_oid

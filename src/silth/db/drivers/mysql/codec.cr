@@ -92,8 +92,8 @@ module Silth::DB::MySQL
       when TYPE_LONGLONG
         text = String.new(raw)
         text.to_i64? || text.to_u64.to_i64!
-      when TYPE_FLOAT                                 then String.new(raw).to_f32
-      when TYPE_DOUBLE                  then String.new(raw).to_f64
+      when TYPE_FLOAT                    then String.new(raw).to_f32
+      when TYPE_DOUBLE                   then String.new(raw).to_f64
       when TYPE_DECIMAL, TYPE_NEWDECIMAL then ::Silth::Decimal.new(String.new(raw))
       when TYPE_DATE
         text = String.new(raw)
@@ -121,14 +121,14 @@ module Silth::DB::MySQL
         else
           io.read_bytes(Int32, LE)
         end
-      when TYPE_LONGLONG                            then col.unsigned? ? io.read_bytes(UInt64, LE).to_i64! : io.read_bytes(Int64, LE)
-      when TYPE_FLOAT                               then io.read_bytes(Float32, LE)
-      when TYPE_DOUBLE                              then io.read_bytes(Float64, LE)
-      when TYPE_DATE                                then read_binary_datetime(io).try { |t| ::Silth::Date.new(t) }
-      when TYPE_DATETIME, TYPE_TIMESTAMP            then read_binary_datetime(io)
-      when TYPE_TIME                                then read_binary_time(io, col)
-      when TYPE_NULL                                then nil
-      else                                               decode_text(read_lenenc_bytes(io), col)
+      when TYPE_LONGLONG                 then col.unsigned? ? io.read_bytes(UInt64, LE).to_i64! : io.read_bytes(Int64, LE)
+      when TYPE_FLOAT                    then io.read_bytes(Float32, LE)
+      when TYPE_DOUBLE                   then io.read_bytes(Float64, LE)
+      when TYPE_DATE                     then read_binary_datetime(io).try { |t| ::Silth::Date.new(t) }
+      when TYPE_DATETIME, TYPE_TIMESTAMP then read_binary_datetime(io)
+      when TYPE_TIME                     then read_binary_time(io, col)
+      when TYPE_NULL                     then nil
+      else                                    decode_text(read_lenenc_bytes(io), col)
       end
     end
 
@@ -223,17 +223,17 @@ module Silth::DB::MySQL
 
     def write_param(io : IO, value : Value) : Nil
       case value
-      when Nil     then nil
-      when Bool    then io.write_byte(value ? 1_u8 : 0_u8)
-      when Int32   then io.write_bytes(value, LE)
-      when Int64   then io.write_bytes(value, LE)
-      when Float32 then io.write_bytes(value.to_s.to_f64, LE) # keeps the decimal value ("0.1", not 0.100000001)
-      when Float64 then io.write_bytes(value, LE)
-      when Time    then write_datetime(io, value.to_utc)
+      when Nil                             then nil
+      when Bool                            then io.write_byte(value ? 1_u8 : 0_u8)
+      when Int32                           then io.write_bytes(value, LE)
+      when Int64                           then io.write_bytes(value, LE)
+      when Float32                         then io.write_bytes(value.to_s.to_f64, LE) # keeps the decimal value ("0.1", not 0.100000001)
+      when Float64                         then io.write_bytes(value, LE)
+      when Time                            then write_datetime(io, value.to_utc)
       when ::Silth::Decimal, ::Silth::Date then write_lenenc_bytes(io, value.to_s.to_slice)
-      when Bytes   then write_lenenc_bytes(io, value)
-      when String  then write_lenenc_bytes(io, value.to_slice)
-      else              write_lenenc_bytes(io, value.to_json.to_slice) # JSON::Any, arrays
+      when Bytes                           then write_lenenc_bytes(io, value)
+      when String                          then write_lenenc_bytes(io, value.to_slice)
+      else                                      write_lenenc_bytes(io, value.to_json.to_slice) # JSON::Any, arrays
       end
     end
 

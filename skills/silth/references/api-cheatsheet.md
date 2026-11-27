@@ -2,7 +2,7 @@
 
 ## Config & env
 `Silth.config.string("app.name")`, `.int("server.port", 3000)`, `.bool`, `.array`, `.hash`, `.bind("mail", MailSettings)`. YAML supports `${VAR:-default}` and `when@production:` blocks. `Silth.env`, `Silth.production?`.
-JSON times: `json_time_precision: 3|auto|0|6|9` in config/app.yml (RFC 3339 UTC `…Z`; `auto` = no fraction for whole seconds, else 3/6/9 digits like Rust's chrono). Server: `workers: 4|auto` in config/server.yml (`WEB_CONCURRENCY`, `bin/<app> server -w auto`) runs supervised processes on one port (SO_REUSEPORT).
+JSON times: `json_time_precision: 3|auto|0|6|9` in config/app.yml (RFC 3339 UTC `…Z`; `auto` = no fraction for whole seconds, else 3/6/9 digits like Rust's chrono). Server: `workers: 4|auto` in config/server.yml (`WEB_CONCURRENCY`, `bin/cli server -w auto`) runs supervised processes on one port (SO_REUSEPORT).
 
 ## Context / controller
 params: `params["id"]`, `params["q"]?`, `params.int("page", 1)`, `params.permit(:a, from: :post)`, `params.file("avatar")`, `params.json`.

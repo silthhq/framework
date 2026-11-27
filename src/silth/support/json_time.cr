@@ -39,7 +39,6 @@ module Silth
     def self.format(time : Time) : String
       String.build { |io| format(time, io) }
     end
-
   end
 end
 
