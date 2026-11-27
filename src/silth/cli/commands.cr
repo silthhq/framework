@@ -545,7 +545,19 @@ module Silth::Commands
           FileUtils.cp(f, dest)
         end
       end
+      Export.write_internal_assets(output)
       success "Exported #{targets.uniq.size} page(s) to #{output}/"
+    end
+
+    # Writes the framework's own assets (`/_silth/silth.js`…) that exported pages
+    # load: they are served from the binary, never from `public/`.
+    def self.write_internal_assets(output : String) : Nil
+      InternalAssetsMiddleware::FILES.each do |path, (_type, body)|
+        next if path.ends_with?("livereload.js") # development only
+        dest = File.join(output, path)
+        Dir.mkdir_p(File.dirname(dest))
+        File.write(dest, body)
+      end
     end
   end
 end

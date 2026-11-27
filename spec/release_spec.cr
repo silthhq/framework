@@ -26,6 +26,15 @@ describe Silth::Commands::Export do
       Silth::Commands::Export.output_file(path).should eq(file)
     end
   end
+
+  it "writes the framework's assets that exported pages load" do
+    dir = File.join(Dir.tempdir, "silth-export-#{Random::Secure.hex(4)}")
+    Silth::Commands::Export.write_internal_assets(dir)
+    File.read(File.join(dir, "_silth/silth.js")).should contain("live")
+    File.exists?(File.join(dir, "_silth/livereload.js")).should be_false
+  ensure
+    FileUtils.rm_rf(dir) if dir
+  end
 end
 
 describe Silth::Deprecation do

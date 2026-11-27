@@ -14,7 +14,7 @@ Each release publishes the `silth` CLI for Linux (`amd64`, `arm64`) and macOS wi
 
 ## [Unreleased]
 
-## [0.1.0]
+## [0.1.0] - 2026-11-27
 
 The first release.
 
