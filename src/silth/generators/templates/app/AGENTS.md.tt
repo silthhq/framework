@@ -8,6 +8,7 @@ Read this file before changing code. Full docs: https://silth.dev/docs · LLM in
 | Task | Command |
 |---|---|
 | Dev server (rebuild + live reload) | `silth serve` |
+| Type-check after a change (seconds, no build) | `silth check` (`--spec` for the specs too) |
 | Run tests | `silth test` (or `crystal spec`) |
 | Generate code | `silth g scaffold Post title:string body:text? user:references` |
 | Migrations | `silth db:migrate`, `silth db:rollback`, `silth db:status` |
@@ -35,6 +36,7 @@ assets/            CSS/JS served as-is in dev, fingerprinted by `silth assets:bu
 ## Conventions (follow them)
 
 - Models: `primary_key`, `column name : Type`, `belongs_to x : X`, `has_many xs : X`, `validates field, presence: true`.
+  Money and quantities are `Decimal` (exact, `"12.50"` in JSON), calendar dates `Date`; never `Float64` for money.
   Non-nilable getters raise when the value is missing; use `field?` for a nilable read.
 - Controllers render with `render "dir/template", local: value` and redirect with `redirect route("name", id: x.id), notice: "…"`.
   Mass assignment must go through `params.permit(:a, :b, from: :model)`.

@@ -12,7 +12,7 @@ Silth is an MVC web framework for Crystal with zero third-party shards. Full doc
 1. Read `AGENTS.md` at the project root, then `config/routes.cr` (or `silth routes --json`).
 2. Prefer generators, then refine: `silth g scaffold Post title:string 'body:text?' 'user:references?'`.
 3. After changing models: write a migration (`silth g migration …`), run `silth db:migrate`.
-4. Before finishing: `crystal tool format`, then `silth test` (or `crystal spec`). Fix every compiler error — they point to exact lines, including inside templates.
+4. After each change, `silth check` type-checks the whole app in a few seconds without building it. Before finishing: `crystal tool format`, then `silth test` (or `crystal spec`). Fix every compiler error — they point to exact lines, including inside templates.
 
 ## Golden rules
 
@@ -25,6 +25,7 @@ Silth is an MVC web framework for Crystal with zero third-party shards. Full doc
 - Base classes must be required before subclasses (`src/app.cr` handles it; new top-level directories need a `require "./dir/**"` line).
 - Quote nullable generator fields in shells: `'body:text?'`.
 - Callbacks are plain methods you override: `def before_save; …; end`.
+- Money is `Decimal`, never `Float64`: `column total : Decimal`, `Decimal.new("12.50")`, `amount.round(2)`. Calendar dates are `Date` (`column due_on : Date`).
 
 ## Cheat sheet
 

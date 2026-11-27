@@ -1,0 +1,18 @@
+# Authentication. Every key has a default: delete what you do not change.
+
+# Password hashing for new passwords: bcrypt or argon2id. Both are always
+# verified, and a login re-hashes a password stored with other settings.
+password_algorithm: bcrypt
+bcrypt_cost: 12
+argon2:
+  memory: 19456        # KiB (OWASP: 19 MiB, 2 iterations, 1 lane)
+  iterations: 2
+  parallelism: 1
+rehash_on_login: true
+
+# Default algorithm of Silth::JWT.encode: HS256, HS384 or HS512.
+jwt_algorithm: HS256
+
+# Login throttling and the remember-me cookie.
+max_attempts: 5
+remember_days: 30

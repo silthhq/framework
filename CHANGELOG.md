@@ -14,6 +14,38 @@ Each release publishes the `silth` CLI for Linux (`amd64`, `arm64`) and macOS wi
 
 ## [Unreleased]
 
+### Added
+
+- `Decimal` (`Silth::Decimal`): exact decimal numbers that keep their scale (`Decimal.new("12.50")` prints `12.50`), for money, quantities and rates. PostgreSQL `NUMERIC` and MySQL `DECIMAL` columns are read as `Decimal`, models declare `column total : Decimal`, JSON writes it as a string (`"12.50"`), form requests and JSON bodies read strings or numbers. Rounding half to even by default (`round(2, :ties_away)` and the other modes), `truncate`, `rescale`, `to_fixed`, `normalize`; division stops at 28 places like `rust_decimal`. `BigDecimal` columns work too. `query.sum_decimal(:column)` sums exactly.
+- `Date` (`Silth::Date`): calendar dates for `DATE` columns, written to JSON as `"2026-11-27"`, with calendar arithmetic (`date + 30`, `shift(months: 1)`, `at_end_of_month`, ranges of days).
+- `app.json_time_precision` (`3` by default, `auto`, `0`, `6`, `9`): how times are written to JSON everywhere (models, hashes, `JSON::Serializable` structs). `auto` writes no fraction for a whole second and keeps the microseconds PostgreSQL stores (Rust's chrono format).
+- Argon2id password hashing in pure Crystal (`Silth::Argon2`, with BLAKE2b), and `Silth::Password`: `auth.password_algorithm: bcrypt | argon2id` in `config/auth.yml`, both always verified (PHC strings from any implementation), and a successful login re-hashes a password stored with other settings (`auth.rehash_on_login`).
+- JWT signed with HS384 and HS512 (`algorithm:` on `Silth::JWT.encode`, `algorithms:` on `decode`, default `auth.jwt_algorithm`).
+- `Silth::HTTPClient`: `multipart:` bodies with fields and files (`HTTPClient::File`), binary request bodies, `response.bytes`.
+- `server.workers` (`auto`, a number, `WEB_CONCURRENCY`, `bin/<app> server --workers`): supervised worker processes sharing the port with `SO_REUSEPORT`, restarted when they die, stopped gracefully. New apps use `auto` in production.
+- `silth check`: type-checks the application without generating code (about half the time of a build), `--spec` includes the specs.
+- PostgreSQL: statements are prepared once per connection and reused (`?statement_cache_size=256`, `?prepared_statements=false` for PgBouncer in transaction mode); a statement made stale by a schema change is prepared again.
+- New apps get a documented `config/auth.yml`.
+
+### Changed
+
+- The connection pool is fair under contention: once a fiber has waited more than a millisecond, released connections are handed to the waiting fibers in their order of arrival (the p99 latency of the benchmark against Loco dropped five to six times).
+- `save` and `destroy` no longer open a transaction when the model has no hooks, counter caches or dependents: a lone `INSERT … RETURNING` or `UPDATE` is atomic, and two round trips are saved.
+- Models are written to JSON directly (keys known at compile time, times formatted by hand): about twice as fast, as fast as rendering the same list in HTML.
+- `NUMERIC`/`DECIMAL` values are `Decimal` instead of `Float64`, and `DATE` values `Date` instead of `Time` (see Upgrading).
+- `Time` values in `JSON::Serializable` structs and hashes follow `app.json_time_precision` (3 digits by default) like models already did.
+- Generators refuse an unknown field type (`views:int33`) instead of generating a `String` column; `int32`, `int64`, `float64`, `numeric`, `money`… are recognized, `decimal` makes a `Decimal` column (`price:decimal:12,4` for precision and scale), `date` a `Date`.
+
+### Fixed
+
+- The PostgreSQL cache computed expiry times with the application's clock and compared them with the database's: entries lived too long (or too short) when the clocks differed.
+
+### Upgrading
+
+- A model column on a `NUMERIC`/`DECIMAL` column typed `Float64` still works (the value is converted), but raw rows (`DB.query`) now hold `Decimal`: call `.to_f64` where a float is needed, or better, switch the column to `Decimal`.
+- A `Time` column on a `DATE` column still works (midnight UTC); raw rows hold `Date`.
+- JSON produced from `JSON::Serializable` structs now has milliseconds (`…T10:00:00.000Z`); set `json_time_precision: 0` in `config/app.yml` to keep the previous format.
+
 ## [0.1.0] - 2026-11-27
 
 The first release.

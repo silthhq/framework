@@ -55,6 +55,18 @@ Each item shipped with specs, the cheat sheet and the docs page.
 - [x] Component previews page in the dashboard (`Silth::ComponentPreview`, like mail previews): widths, editable props, slots, usage snippet; the base for a future UI kit
 - [x] Accessible, unstyled-by-default components shipped with the template (`UI::Dialog`, `UI::Dropdown`, `UI::Tabs`, `UI::Toast`) working with live components, with previews
 
+## 0.2: performance and business applications
+
+Driven by a benchmark against Loco (Rust) and by porting an ERP from Loco to Silth.
+
+- [x] Fair connection pool (hand-over to the oldest waiter after 1 ms of waiting): p99 divided by 5 to 6 under contention
+- [x] No transaction around a save without hooks; prepared statements cached per PostgreSQL connection; models written to JSON directly (twice as fast)
+- [x] `server.workers` (supervised processes on one port), `silth check`, strict generator types
+- [x] Money and dates: `Decimal` (exact, scale kept, `"12.50"` in JSON) and `Date` end to end; JSON time precision (`auto` = chrono's format)
+- [x] Argon2id password hashing (pure Crystal) next to bcrypt, re-hash on login; JWT HS384/HS512; multipart HTTP client
+- [ ] Crystal execution contexts (multi-threaded fibers) once stable, instead of worker processes
+- [ ] Incremental type checking: watch mode for `silth check` keeping the compiler warm
+
 ## Stage 2: ecosystem
 
 The framework stays MIT and never depends on a paid service. Paid services plug into public, documented interfaces that are part of the framework: OpenTelemetry export, `Silth::Instrument` events, `config/deploy.yml`.
