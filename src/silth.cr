@@ -35,6 +35,18 @@ end
 require "./silth/support/inflector"
 require "./silth/support/dotenv"
 require "./silth/support/crypto"
+require "./silth/support/decimal"
+require "./silth/support/date"
+require "./silth/support/json_time"
+
+# `Decimal` and `Date` at the top level (`column total : Decimal`), unless the
+# application defined constants with these names before requiring Silth.
+{% unless @top_level.has_constant?("Decimal") %}
+  alias Decimal = Silth::Decimal
+{% end %}
+{% unless @top_level.has_constant?("Date") %}
+  alias Date = Silth::Date
+{% end %}
 require "./silth/support/fake"
 require "./silth/errors"
 require "./silth/support/deprecation"

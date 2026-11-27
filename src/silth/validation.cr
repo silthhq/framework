@@ -82,7 +82,7 @@ module Silth
 
     def self.number(value) : Float64?
       case value
-      when Int32, Int64, Float32, Float64 then value.to_f64
+      when Int32, Int64, Float32, Float64, ::Silth::Decimal then value.to_f64
       when String then value.to_f64?
       else             nil
       end

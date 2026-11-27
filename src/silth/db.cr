@@ -33,6 +33,7 @@ module Silth
   # ```
   module DB
     alias Value = Nil | Bool | Int32 | Int64 | Float32 | Float64 | String | Bytes | Time | JSON::Any |
+                  ::Silth::Decimal | ::Silth::Date |
                   Array(String) | Array(Int32) | Array(Int64) | Array(Float32) | Array(Float64)
     alias Row = Hash(String, Value)
 
@@ -113,30 +114,62 @@ module Silth
       property? broken = false
     end
 
-    # Fixed-size connection pool safe to use from many fibers.
+    # Fixed-size connection pool safe to use from many fibers, and fair to them.
+    #
+    # Under contention (more fibers than connections), a released connection
+    # goes back to the idle list and wakes the longest waiting fiber; a fiber
+    # arriving at that moment may take it first, which keeps throughput high.
+    # Once the oldest waiter has waited more than `STARVATION_THRESHOLD`, the
+    # pool switches to first come, first served: released connections are
+    # handed directly to the waiters in order, and newcomers queue behind them
+    # (the policy of Go's `sync.Mutex`). This bounds tail latency.
     class Pool
+      # How long a waiting fiber may be overtaken before connections are handed over in order.
+      STARVATION_THRESHOLD = 1.millisecond
+
+      # :nodoc: a fiber waiting for a connection. The channel receives a
+      # connection (handed over) or nil (try again).
+      class Waiter
+        getter channel = ::Channel(Connection?).new(1)
+        getter since : Time::Instant
+
+        def initialize(@since = Time.instant)
+        end
+      end
+
       getter max_size : Int32
       getter total = 0
       @idle = Deque(Connection).new
+      @waiters = Deque(Waiter).new
       @mutex = Mutex.new
-      @available : ::Channel(Nil)
 
       def initialize(@max_size : Int32, @timeout : Time::Span, &@factory : -> Connection)
-        @available = ::Channel(Nil).new(@max_size)
       end
 
       def checkout : Connection
         deadline = Time.instant + @timeout
+        waiter : Waiter? = nil
         loop do
           create = false
           @mutex.synchronize do
-            while conn = @idle.shift?
-              return conn unless conn.closed?
-              @total -= 1
+            # A fiber already waiting goes before newcomers once someone starves.
+            if waiter || !starving?
+              while conn = @idle.shift?
+                return conn unless conn.closed?
+                @total -= 1
+              end
             end
             if @total < @max_size
               @total += 1
               create = true
+            else
+              # A woken waiter that lost the race keeps its place at the front.
+              if w = waiter
+                @waiters.unshift(w)
+              else
+                waiter = Waiter.new
+                @waiters.push(waiter.not_nil!)
+              end
             end
           end
           if create
@@ -144,15 +177,33 @@ module Silth
               return @factory.call
             rescue ex
               @mutex.synchronize { @total -= 1 }
+              wake_next
               raise ex
             end
           end
+          current = waiter.not_nil!
           remaining = deadline - Time.instant
-          raise PoolTimeout.new("Timed out waiting for a database connection (pool size #{@max_size})") if remaining <= Time::Span.zero
-          select
-          when @available.receive
-          when timeout(remaining)
+          if remaining > Time::Span.zero
+            select
+            when handed = current.channel.receive
+              return handed if handed
+              next
+            when timeout(remaining)
+            end
           end
+          # Timed out: leave the queue, unless a connection was handed over meanwhile.
+          handed = @mutex.synchronize do
+            if @waiters.delete(current)
+              nil
+            else
+              select
+              when c = current.channel.receive then c
+              else                                  nil
+              end
+            end
+          end
+          return handed if handed
+          raise PoolTimeout.new("Timed out waiting for a database connection (pool size #{@max_size})")
         end
       end
 
@@ -161,13 +212,19 @@ module Silth
           if conn.closed? || conn.broken?
             conn.close rescue nil
             @total -= 1
+            # Room for a new connection: let the oldest waiter open it.
+            @waiters.shift?.try &.channel.send(nil)
+          elsif waiter = @waiters.first?
+            @waiters.shift
+            if Time.instant - waiter.since > STARVATION_THRESHOLD
+              waiter.channel.send(conn) # hand over: no one can overtake it
+            else
+              @idle.push(conn)
+              waiter.channel.send(nil) # wake it; a running fiber may still be faster
+            end
           else
             @idle.push(conn)
           end
-        end
-        select
-        when @available.send(nil)
-        else
         end
       end
 
@@ -176,11 +233,27 @@ module Silth
           @idle.each { |c| c.close rescue nil }
           @idle.clear
           @total = 0
+          @waiters.each &.channel.send(nil)
+          @waiters.clear
         end
       end
 
       def idle_count : Int32
         @mutex.synchronize { @idle.size }
+      end
+
+      # Fibers waiting for a connection.
+      def waiting : Int32
+        @mutex.synchronize { @waiters.size }
+      end
+
+      # True when the oldest waiting fiber has waited too long (called under the mutex).
+      private def starving? : Bool
+        (w = @waiters.first?) ? Time.instant - w.since > STARVATION_THRESHOLD : false
+      end
+
+      private def wake_next : Nil
+        @mutex.synchronize { @waiters.shift?.try &.channel.send(nil) }
       end
     end
 
@@ -503,6 +576,8 @@ module Silth
       when Symbol      then v.to_s
       when Char        then v.to_s
       when UUID        then v.to_s
+      when BigDecimal  then ::Silth::Decimal.new(v)
+      when BigInt      then ::Silth::Decimal.new(v)
       when Array       then JSON.parse(v.to_json)
       when Hash, NamedTuple then JSON.parse(v.to_json)
       else

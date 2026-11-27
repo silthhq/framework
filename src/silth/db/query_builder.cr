@@ -601,6 +601,13 @@ module Silth::DB
       end
     {% end %}
 
+    # The exact sum of a decimal column (zero when no row matches):
+    # `Invoice.where(status: "paid").sum_decimal(:total_ttc) # => 1234.50`.
+    def sum_decimal(column : String | Symbol) : ::Silth::Decimal
+      sql, args = reorder.to_sql("SUM(#{q(column)})")
+      DB.as_decimal?(@db.scalar(sql, args)) || ::Silth::Decimal.zero
+    end
+
     def paginate(page : Int = 1, per_page : Int = 20) : Page(Row)
       p = {page.to_i32, 1}.max
       Page(Row).new(for_page(p, per_page).rows, p, per_page.to_i32, count)
@@ -718,6 +725,7 @@ module Silth::DB
     case value
     when Int32, Int64 then value.to_i64
     when Float32, Float64 then value.to_i64
+    when ::Silth::Decimal then value.to_i64
     when String then value.to_i64?
     when Bool then value ? 1_i64 : 0_i64
     else nil
@@ -726,9 +734,19 @@ module Silth::DB
 
   def self.as_f64?(value : Value) : Float64?
     case value
-    when Int32, Int64, Float32, Float64 then value.to_f64
+    when Int32, Int64, Float32, Float64, ::Silth::Decimal then value.to_f64
     when String then value.to_f64?
     else nil
+    end
+  end
+
+  def self.as_decimal?(value : Value) : ::Silth::Decimal?
+    case value
+    when ::Silth::Decimal then value
+    when Int32, Int64     then ::Silth::Decimal.new(value)
+    when Float32, Float64 then value.finite? ? ::Silth::Decimal.new(value.to_f64) : nil
+    when String           then ::Silth::Decimal.parse?(value)
+    else                       nil
     end
   end
 end

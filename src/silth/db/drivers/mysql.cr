@@ -599,6 +599,8 @@ module Silth::DB::MySQL
         io << (value.finite? ? value.to_s : "NULL")
       when String then quote_string(io, value)
       when Time   then io << '\'' << DB.format_time(value) << '\''
+      when ::Silth::Decimal then io << value
+      when ::Silth::Date    then io << '\'' << value << '\''
       when Bytes  then io << "X'" << value.hexstring << '\''
       else             quote_string(io, value.to_json)
       end

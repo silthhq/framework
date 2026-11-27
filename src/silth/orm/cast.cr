@@ -21,6 +21,7 @@ module Silth::ORM
         case v
         when Nil    then nil
         when Int32, Int64, Float32, Float64 then v.{{conv.id}}
+        when ::Silth::Decimal then {% if type.stringify.starts_with?("Float") %}v.{{conv.id}}{% else %}v.to_big_i.{{conv.id}}{% end %}
         when Bool   then v ? {{type}}.new(1) : {{type}}.new(0)
         when String then v.strip.empty? ? nil : (v.strip.{{conv.id}}? || raise CastError.new(v, {{type.stringify}}))
         else             raise CastError.new(v.to_s, {{type.stringify}})
@@ -42,6 +43,7 @@ module Silth::ORM
       case v
       when Nil    then nil
       when Time   then v
+      when ::Silth::Date then v.time
       when String then v.strip.empty? ? nil : DB.parse_time(v)
       when Int32, Int64 then Time.unix(v.to_i64)
       else             raise CastError.new(v.to_s, "Time")
@@ -56,6 +58,35 @@ module Silth::ORM
       when Bytes     then JSON::Any.new(Base64.strict_encode(v))
       when Time      then JSON::Any.new(v.to_rfc3339)
       else                JSON.parse(v.to_json)
+      end
+    end
+
+    # Exact decimals: from `NUMERIC`/`DECIMAL` values, strings (`"12.50"`), integers and floats.
+    def cast(v : Value, t : ::Silth::Decimal.class) : ::Silth::Decimal?
+      case v
+      when Nil              then nil
+      when ::Silth::Decimal then v
+      when Int32, Int64     then ::Silth::Decimal.new(v)
+      when Float32, Float64 then v.finite? ? ::Silth::Decimal.new(v.to_s) : raise CastError.new(v.to_s, "Decimal")
+      when String           then v.strip.empty? ? nil : (::Silth::Decimal.parse?(v) || raise CastError.new(v, "Decimal"))
+      when JSON::Any        then (raw = v.raw).is_a?(String | Int64 | Float64) ? cast(raw.as(Value), ::Silth::Decimal) : raise CastError.new(v.to_json, "Decimal")
+      else                       raise CastError.new(v.to_s, "Decimal")
+      end
+    end
+
+    def cast(v : Value, t : BigDecimal.class) : BigDecimal?
+      cast(v, ::Silth::Decimal).try(&.to_big_d)
+    end
+
+    # Calendar dates: from `DATE` values, `"2026-11-27"` and times (their date part).
+    def cast(v : Value, t : ::Silth::Date.class) : ::Silth::Date?
+      case v
+      when Nil           then nil
+      when ::Silth::Date then v
+      when Time          then ::Silth::Date.new(v)
+      when String        then v.strip.empty? ? nil : (::Silth::Date.parse?(v) || raise CastError.new(v, "Date"))
+      when JSON::Any     then (s = v.as_s?) ? cast(s.as(Value), ::Silth::Date) : raise CastError.new(v.to_json, "Date")
+      else                    raise CastError.new(v.to_s, "Date")
       end
     end
 
@@ -138,6 +169,8 @@ module Silth::ORM
     def to_db(value) : Value
       case value
       when Nil, Bool, Int32, Int64, Float32, Float64, String, Bytes, Time, JSON::Any then value
+      when ::Silth::Decimal, ::Silth::Date                                       then value
+      when BigDecimal                                                             then ::Silth::Decimal.new(value)
       when Array(String), Array(Int32), Array(Int64), Array(Float32), Array(Float64) then value
       when Int8, Int16, UInt8, UInt16 then value.to_i32
       when UInt32, UInt64            then value.to_i64
@@ -152,13 +185,15 @@ module Silth::ORM
       end
     end
 
-    # JSON serialization that also handles `Bytes` (base64) and `Time` (RFC 3339).
+    # JSON serialization that also handles `Bytes` (base64), `Time` (RFC 3339,
+    # see `Silth::JSONTime`) and decimals (strings keeping their scale).
     def write_json(json : JSON::Builder, value) : Nil
       case value
-      when Nil   then json.null
-      when Bytes then json.string(Base64.strict_encode(value))
-      when Time  then json.string(value.to_rfc3339(fraction_digits: 3))
-      else            value.to_json(json)
+      when Nil        then json.null
+      when Bytes      then json.string(Base64.strict_encode(value))
+      when Time       then json.string { |io| JSONTime.format(value, io) }
+      when BigDecimal then json.string(::Silth::Decimal.new(value).to_s)
+      else                 value.to_json(json)
       end
     end
 

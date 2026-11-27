@@ -142,7 +142,7 @@ describe Silth::DB::MySQL::Codec do
       MySQLSpec.column(MySQLSpec::Codec::TYPE_NEWDECIMAL),
     ]
     time = Time.utc(2026, 11, 25, 8, 30, 15, nanosecond: 123_456_000)
-    expected = [-5_i64, 200, 4_000_000_000_i64, 2.5, time, "héllo", Bytes[0, 1, 255], nil, "-26:03:04.500", nil, 12.5] of MySQLSpec::Value
+    expected = [-5_i64, 200, 4_000_000_000_i64, 2.5, time, "héllo", Bytes[0, 1, 255], nil, "-26:03:04.500", nil, Silth::Decimal.new("12.50")] of MySQLSpec::Value
     le = MySQLSpec::LE
 
     binary = IO::Memory.new
@@ -285,11 +285,11 @@ if url = MySQLSpec.url
         row["ubig"].should eq(-1_i64) # UInt64::MAX wraps, as with the text protocol
         row["real_value"].should eq(1.5_f32)
         row["dbl"].should eq(2.75)
-        row["price"].should eq(1234.56)
+        row["price"].should eq(Silth::Decimal.new("1234.56"))
         row["name"].should eq(tricky)
         row["body"].as(String).size.should eq(70_000)
         row["data"].should eq(blob)
-        row["born"].should eq(Time.utc(1999, 12, 31))
+        row["born"].should eq(Silth::Date.new(1999, 12, 31))
         row["at"].should eq(at)
         row["stamp"].should eq(at)
         row["span"].should eq("-26:03:04.500")

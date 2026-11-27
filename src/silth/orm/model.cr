@@ -886,22 +886,61 @@ module Silth
 
     # --- persistence ------------------------------------------------------------------
 
+    # Validates, runs the hooks and writes the record.
+    #
+    # The write is wrapped in a transaction only when the model has hooks,
+    # counter caches or dependents that run more statements: a lone `INSERT …
+    # RETURNING` or `UPDATE` is atomic already, and skipping `BEGIN`/`COMMIT`
+    # saves two round trips (decided at compile time).
     def save(validate : Bool = true) : Bool
       return false if validate && !valid?
-      self.class.database.transaction do
-        before_save
-        if new_record?
-          before_create
-          __insert
-          after_create
-        else
-          before_update
-          __update
-          after_update
-        end
-        after_save
+      if __transactional_save?
+        self.class.database.transaction { __persist }
+      else
+        __persist
       end
       true
+    end
+
+    private def __persist : Nil
+      before_save
+      if new_record?
+        before_create
+        __insert
+        after_create
+      else
+        before_update
+        __update
+        after_update
+      end
+      after_save
+    end
+
+    # :nodoc: whether saving runs more than one statement (hooks, counter caches).
+    def __transactional_save? : Bool
+      {% begin %}
+        {% hooks = %w(before_save after_save before_create after_create before_update after_update) %}
+        {% found = @type.methods.any?(&.name.starts_with?("__counter_cache_")) %}
+        {% for t in [@type] + @type.ancestors %}
+          {% unless %w(Silth::Model Reference Object).includes?(t.name.stringify) %}
+            {% found = true if t.methods.any? { |m| hooks.includes?(m.name.stringify) } %}
+          {% end %}
+        {% end %}
+        {{found}}
+      {% end %}
+    end
+
+    # :nodoc: whether destroying runs more than one statement (hooks, dependents, counter caches).
+    def __transactional_destroy? : Bool
+      {% begin %}
+        {% found = @type.methods.any? { |m| m.name.starts_with?("__counter_cache_") || m.name.starts_with?("__dependent_") } %}
+        {% for t in [@type] + @type.ancestors %}
+          {% unless %w(Silth::Model Reference Object).includes?(t.name.stringify) %}
+            {% found = true if t.methods.any? { |m| %w(before_destroy after_destroy).includes?(m.name.stringify) } %}
+          {% end %}
+        {% end %}
+        {{found}}
+      {% end %}
     end
 
     def save! : self
@@ -921,24 +960,30 @@ module Silth
 
     def destroy : Bool
       return false if new_record?
-      self.class.database.transaction do
-        before_destroy
-        {% begin %}
-          {% for m in @type.methods.select { |m| m.name.starts_with?("__dependent_") } %}
-            {{m.name.id}}
-          {% end %}
-        {% end %}
-        if self.class.soft_deletes? && responds_to?(:deleted_at=)
-          now = Time.utc
-          write_attribute("deleted_at", now)
-          __update
-        else
-          __delete_row
-          @__destroyed = true
-        end
-        after_destroy
+      if __transactional_destroy?
+        self.class.database.transaction { __destroy_row }
+      else
+        __destroy_row
       end
       true
+    end
+
+    private def __destroy_row : Nil
+      before_destroy
+      {% begin %}
+        {% for m in @type.methods.select { |m| m.name.starts_with?("__dependent_") } %}
+          {{m.name.id}}
+        {% end %}
+      {% end %}
+      if self.class.soft_deletes? && responds_to?(:deleted_at=)
+        now = Time.utc
+        write_attribute("deleted_at", now)
+        __update
+      else
+        __delete_row
+        @__destroyed = true
+      end
+      after_destroy
     end
 
     def destroy! : Nil

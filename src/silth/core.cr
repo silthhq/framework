@@ -138,6 +138,7 @@ module Silth
 
   # :nodoc:
   def self.boot_subsystems : Nil
+    JSONTime.configure(config.string("app.json_time_precision", "3"))
     DB.boot
     PubSub.boot(config)
     Telemetry.boot

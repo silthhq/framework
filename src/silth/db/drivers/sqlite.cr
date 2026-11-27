@@ -155,6 +155,9 @@ module Silth::DB::SQLite
       when Time
         text = DB.format_time(value)
         LibSQLite3.bind_text(stmt, idx, text, text.bytesize, TRANSIENT)
+      when ::Silth::Decimal, ::Silth::Date
+        text = value.to_s
+        LibSQLite3.bind_text(stmt, idx, text, text.bytesize, TRANSIENT)
       else
         text = value.to_json
         LibSQLite3.bind_text(stmt, idx, text, text.bytesize, TRANSIENT)

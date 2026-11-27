@@ -373,10 +373,11 @@ module Silth::DB::Postgres
       when 21, 23              then text.to_i32
       when 700                 then text.to_f32
       when 701                 then text.to_f64
-      when 1700                then text.to_f64? || text
+      when 1700                then ::Silth::Decimal.parse?(text) || text # NaN, Infinity stay text
       when 114, 3802           then JSON.parse(text)
       when 17                  then text.starts_with?("\\x") ? text[2..].hexbytes : text.to_slice.dup
-      when 1082, 1114, 1184    then DB.parse_time(text)
+      when 1082                then ::Silth::Date.parse?(text) || text      # infinity, BC dates stay text
+      when 1114, 1184          then DB.parse_time(text)
       when 1000                then parse_array(text).map { |v| v == "t" }.map(&.to_s)
       when 1005, 1007          then parse_array(text).map(&.to_i32)
       when 1016                then parse_array(text).map(&.to_i64)

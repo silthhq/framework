@@ -103,3 +103,26 @@ describe Silth::Model do
     Silth::DB.scalar("SELECT COUNT(*) FROM notes WHERE title = ?", ["Raw"]).should eq(1)
   end
 end
+
+class HookedNote < Silth::Model
+  table notes
+  primary_key
+  column title : String
+  timestamps
+
+  def before_save
+    self.title = title.strip
+  end
+end
+
+describe "Silth::Model#save transactions" do
+  it "skips BEGIN/COMMIT for a model without hooks, keeps them otherwise" do
+    Note.new.__transactional_save?.should be_false
+    Note.new.__transactional_destroy?.should be_false
+    HookedNote.new.__transactional_save?.should be_true
+    Author.new.__transactional_destroy?.should be_false
+    note = HookedNote.create!(title: "  Atomic  ")
+    note.title.should eq("Atomic")
+    Note.create!(title: "Plain").destroy.should be_true
+  end
+end
