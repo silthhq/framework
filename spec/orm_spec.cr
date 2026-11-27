@@ -64,6 +64,8 @@ describe Silth::Model do
     # InnoDB only indexes FULLTEXT rows on commit, so skip inside a transactional spec.
     Note.search([:title, :body], "plain").count.should eq(1) unless Silth::DB.connection.dialect.name == "mysql"
     Note.paginate(1, 2).total_pages.should eq(2)
+    Note.order(title: :asc).count_by(:pinned).values.sort.should eq([1_i64, 2_i64])
+    Note.pinned.count_by(:title).should eq({"Pinned A" => 1_i64, "Pinned B" => 1_i64})
   end
 
   it "handles relations and eager loading" do

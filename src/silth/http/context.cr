@@ -1,5 +1,6 @@
 require "http/server"
 require "mime"
+require "./content_disposition"
 
 class Fiber
   # :nodoc: request bound to the fiber currently serving it.
@@ -291,21 +292,28 @@ module Silth
       head(204)
     end
 
-    def send_file(file_path : String, filename : String? = nil, disposition : String = "inline", content_type : String? = nil) : Nil
+    def send_file(file_path : String, filename : String? = nil, disposition : String = "inline", content_type : String? = nil,
+                  headers : Hash(String, String)? = nil) : Nil
       raise NotFound.new unless File.file?(file_path)
       self.status = 200
       response.content_type = content_type || MIME.from_filename(file_path, "application/octet-stream")
-      response.headers["Content-Disposition"] = %(#{disposition}; filename="#{(filename || File.basename(file_path)).gsub('"', "")}")
+      response.headers["Content-Disposition"] = ContentDisposition.format(disposition, filename || File.basename(file_path))
+      headers.try &.each { |name, value| response.headers[name] = value }
       response.content_length = File.size(file_path)
       run_before_send
       File.open(file_path) { |f| IO.copy(f, response) } unless method == "HEAD"
       @responded = true
     end
 
-    def send_data(data : Bytes | String, filename : String, content_type : String = "application/octet-stream", disposition = "attachment") : Nil
+    # Sends bytes as a download (`disposition: "inline"` to display them).
+    # *headers* are added last, and may replace the defaults:
+    # `ctx.send_data(pdf, "facture-été.pdf", "application/pdf", headers: {"Cache-Control" => "no-store"})`.
+    def send_data(data : Bytes | String, filename : String, content_type : String = "application/octet-stream", disposition = "attachment",
+                  headers : Hash(String, String)? = nil) : Nil
       self.status = 200
       response.content_type = content_type
-      response.headers["Content-Disposition"] = %(#{disposition}; filename="#{filename.gsub('"', "")}")
+      response.headers["Content-Disposition"] = ContentDisposition.format(disposition, filename)
+      headers.try &.each { |name, value| response.headers[name] = value }
       response.content_length = data.bytesize
       run_before_send
       response.write(data.to_slice)

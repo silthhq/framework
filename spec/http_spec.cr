@@ -143,3 +143,23 @@ describe "Silth::HTTPClient multipart" do
     Silth::HTTPClient.reset_fakes
   end
 end
+
+describe Silth::ContentDisposition do
+  it "keeps an ASCII fallback and the exact UTF-8 name" do
+    Silth::ContentDisposition.format("attachment", "Facture été.pdf")
+      .should eq(%(attachment; filename="Facture _t_.pdf"; filename*=UTF-8''Facture%20%C3%A9t%C3%A9.pdf))
+    Silth::ContentDisposition.format("inline", %(a"b.txt)).should eq(%(inline; filename="a_b.txt"; filename*=UTF-8''a%22b.txt))
+  end
+end
+
+describe Silth::SecureHeadersMiddleware do
+  it "adds, replaces and removes headers from the configuration" do
+    middleware = Silth::SecureHeadersMiddleware.new(extra: {"X-Frame-Options" => "DENY", "Permissions-Policy" => "", "X-Download-Options" => "noopen"})
+    raw = HTTP::Server::Context.new(HTTP::Request.new("GET", "/"), HTTP::Server::Response.new(IO::Memory.new))
+    ctx = Silth::Context.new(raw)
+    middleware.call(ctx, Silth::Chain.new([] of Silth::Middleware, Silth::Endpoint.new { |_| nil }))
+    ctx.response.headers["X-Frame-Options"].should eq("DENY")
+    ctx.response.headers["X-Download-Options"].should eq("noopen")
+    ctx.response.headers.has_key?("Permissions-Policy").should be_false
+  end
+end

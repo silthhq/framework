@@ -86,7 +86,7 @@ module Silth
       @middleware.use StaticMiddleware.new(config.string("app.public_dir", "public"))
       @middleware.use StaticMiddleware.new(Silth.assets.source_dir, "/assets") if Silth.env != "production"
       @middleware.use MethodOverrideMiddleware.new
-      @middleware.use SecureHeadersMiddleware.new(config.string?("security.csp"), config.bool("security.hsts", Silth.env == "production"))
+      @middleware.use SecureHeadersMiddleware.new(config.string?("security.csp"), config.bool("security.hsts", Silth.env == "production"), config.hash("security.headers"))
       if config.has?("cors.origins")
         @middleware.use CORSMiddleware.new(config.array("cors.origins"), credentials: config.bool("cors.credentials", false),
           paths: config.has?("cors.paths") ? config.array("cors.paths") : ["/api"])

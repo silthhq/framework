@@ -583,6 +583,16 @@ module Silth::DB
       DB.as_i64(value)
     end
 
+    # Counts the rows per value of *column* (`GROUP BY`):
+    # `Post.where(published: true).count_by(:user_id) # => {1 => 4, 7 => 2}`.
+    def count_by(column : String | Symbol) : Hash(Value, Int64)
+      base = reorder
+      base.selects = ["#{q(column)}", "COUNT(*)"]
+      base.groups = [q(column)]
+      sql, args = base.to_sql
+      @db.query(sql, args).rows.to_h { |row| {row[0], DB.as_i64(row[1])} }
+    end
+
     def exists? : Bool
       sql, args = limit(1).to_sql("1")
       !@db.query(sql, args).empty?

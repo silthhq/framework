@@ -64,8 +64,10 @@ module Silth
   end
 
   # Security headers with a per-request CSP nonce (`csp_nonce` helper).
+  # *extra* (`security.headers` in `config/security.yml`) adds headers or
+  # replaces the defaults (`X-Frame-Options: DENY`); an empty value removes one.
   class SecureHeadersMiddleware < Middleware
-    def initialize(@csp : String? = nil, @hsts : Bool = false)
+    def initialize(@csp : String? = nil, @hsts : Bool = false, @extra : Hash(String, String) = {} of String => String)
     end
 
     def call(ctx : Context, chain : Chain) : Nil
@@ -81,6 +83,7 @@ module Silth
       if csp = @csp
         headers["Content-Security-Policy"] = csp.gsub("{nonce}", nonce)
       end
+      @extra.each { |name, value| value.empty? ? headers.delete(name) : (headers[name] = value) }
       chain.next(ctx)
     end
   end

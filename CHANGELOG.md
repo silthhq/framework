@@ -26,6 +26,9 @@ Each release publishes the `silth` CLI for Linux (`amd64`, `arm64`) and macOS wi
 - `silth check`: type-checks the application without generating code (about half the time of a build), `--spec` includes the specs.
 - PostgreSQL: statements are prepared once per connection and reused (`?statement_cache_size=256`, `?prepared_statements=false` for PgBouncer in transaction mode); a statement made stale by a schema change is prepared again.
 - New apps get a documented `config/auth.yml`.
+- `query.count_by(:column)`: the number of rows per value (`GROUP BY`), `{"draft" => 4, "sent" => 2}`.
+- `security.headers` in `config/security.yml`: extra response headers, or replacements for the defaults (an empty value removes one).
+- `send_data` and `send_file` take `headers:` (added last, may replace the defaults).
 
 ### Changed
 
@@ -38,6 +41,7 @@ Each release publishes the `silth` CLI for Linux (`amd64`, `arm64`) and macOS wi
 
 ### Fixed
 
+- `send_data` and `send_file` write file names outside ASCII as RFC 6266 asks (`filename="ASCII fallback"; filename*=UTF-8''…`, `Silth::ContentDisposition`); a name like `facture-été.pdf` used to produce an invalid header.
 - The PostgreSQL cache computed expiry times with the application's clock and compared them with the database's: entries lived too long (or too short) when the clocks differed.
 
 ### Upgrading

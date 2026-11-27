@@ -6,7 +6,7 @@ JSON times: `json_time_precision: 3|auto|0|6|9` in config/app.yml (RFC 3339 UTC 
 
 ## Context / controller
 params: `params["id"]`, `params["q"]?`, `params.int("page", 1)`, `params.permit(:a, from: :post)`, `params.file("avatar")`, `params.json`.
-responses: `render`, `json(obj, status)`, `text`, `redirect(url, notice:)`, `redirect_back`, `head(204)`, `send_file`, `stream`, `sse`, `problem(422, "Title")`.
+responses: `render`, `json(obj, status)`, `text`, `redirect(url, notice:)`, `redirect_back`, `head(204)`, `send_file`, `send_data(bytes, "facture-été.pdf", "application/pdf", headers: {...})` (RFC 6266 file names), `stream`, `sse`, `problem(422, "Title")`.
 state: `session[...]`, `flash["notice"]`, `ctx.set_signed_cookie`, `ctx.auth_user`, `ctx.locale`.
 filters: `before_action :m, only: [...]`, `after_action`, `rescue_from Klass, with: :handler`.
 validation: `data = validate!(CreatePostRequest)` (FormRequest with `field title : String, min: 3`).
@@ -15,7 +15,7 @@ validation: `data = validate!(CreatePostRequest)` (FormRequest with `field title
 CRUD: `create!`, `save`, `save!`, `update`, `destroy`, `find`, `find?`, `find_by`, `first_or_create`, `reload`, `touch`, `increment!`. A save runs in a transaction only when the model has hooks or counter caches.
 Types: `column total : Decimal` (NUMERIC/DECIMAL, exact, keeps its scale: JSON `"12.50"`; `Decimal.new("19.90") * 3`, `.round(2)` half-even, `.round(2, :ties_away)`, `.truncate(2)`, `.rescale(2)`, `.to_fixed(2)`, `.normalize`, `/` stops at 28 places), `column due_on : Date` (DATE, JSON `"2026-11-27"`; `Date.today`, `+ 30`, `shift(months: 1)`, `at_end_of_month`, `d1 - d2` days, ranges). `BigDecimal` columns work too. Exact sums: `query.sum_decimal(:total)`.
 Query: `where`, `or_where`, `where_not`, `where_in`, `where_null`, `where_between`, `where_like`, `where_group { |g| … }`, `join`, `order(created_at: :desc)`, `latest`, `limit`, `offset`, `group_by`, `having`, `select`, `distinct`, `includes(:rel)`, `with_trashed`, `lock_for_update(skip_locked: true)`.
-Fetch: `to_a`, `first`, `first?`, `last`, `count`, `exists?`, `pluck`, `sum/avg/min/max`, `paginate(page, per)`, `cursor_paginate`, `find_each`.
+Fetch: `to_a`, `first`, `first?`, `last`, `count`, `count_by(:status)` (hash value → count), `exists?`, `pluck`, `sum/avg/min/max`, `paginate(page, per)`, `cursor_paginate`, `find_each`.
 PostgreSQL: `search([:title, :body], q)`, `order_by_relevance`, `nearest(:embedding, vec, metric: :cosine)`, `select_distance`, `where_json`, `where_json_contains`.
 Relations: `belongs_to x : X, optional: true, counter_cache: true` (X.<table>_count), polymorphic `belongs_to commentable : Post | Video, polymorphic: true` + `has_many comments : Comment, as: commentable` (reader returns `Silth::Model?`), `has_many xs : X, through: "pivot", dependent: :destroy`, `has_one`. Many-to-many: `attach_tags`, `detach_tags`, `sync_tags`.
 Locking: `optimistic_locking` + `t.lock_version` → `Silth::ORM::StaleObjectError` on concurrent update/destroy.
