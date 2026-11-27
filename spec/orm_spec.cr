@@ -126,3 +126,30 @@ describe "Silth::Model#save transactions" do
     Note.create!(title: "Plain").destroy.should be_true
   end
 end
+
+class CreateTokensSpecTable < Silth::Migration
+  version 2026_01_01_000005
+
+  def change
+    create_table :spec_tokens do |t|
+      t.id
+      t.string :pid, null: false
+      t.string :public_id, null: false
+    end
+  end
+end
+
+class SpecToken < Silth::Model
+  table spec_tokens
+  primary_key
+  column pid : String, uuid: :v4
+  column public_id : String, uuid: true
+end
+
+describe "uuid columns" do
+  it "fills random (v4) and time-ordered (v7) UUIDs on insert" do
+    token = SpecToken.create!
+    UUID.new(token.pid).version.should eq(UUID::Version::V4)
+    token.public_id[14].should eq('7')
+  end
+end

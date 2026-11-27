@@ -97,3 +97,20 @@ class WelcomeCapture < Silth::Mail
     text "Hi"
   end
 end
+
+class InlineLogoSpecMail < Silth::Mail
+  def build : Nil
+    to "ada@example.com"
+    subject "Logo"
+    html %(<img src="cid:logo">)
+    attach_inline Bytes[0x89, 0x50, 0x4E, 0x47], "logo.png", "image/png", "logo"
+  end
+end
+
+describe "Silth::Mail inline attachments" do
+  it "carries a Content-ID the HTML refers to" do
+    mime = InlineLogoSpecMail.new.to_mime
+    mime.should contain("Content-ID: <logo>")
+    mime.should contain("Content-Disposition: inline; filename=\"logo.png\"")
+  end
+end

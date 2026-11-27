@@ -149,7 +149,8 @@ module Silth
     end
 
     # Declares a column: `column title : String`, `column views : Int32 = 0`.
-    # Options: `hidden: true` (excluded from JSON), `column: "db_name"`.
+    # Options: `hidden: true` (excluded from JSON), `column: "db_name"`,
+    # `uuid: true` (a UUIDv7 set on insert when empty, `uuid: :v4` for a random one).
     macro column(decl, primary = false, auto = false, hidden = false, column = nil, uuid = false)
       {% type = decl.type.resolve %}
       {% nilable = type.nilable? %}
@@ -1019,7 +1020,11 @@ module Silth
         {% if names.includes?("updated_at") %} @updated_at ||= now {% end %}
         {% for iv in @type.instance_vars %}
           {% if (a = iv.annotation(::Silth::Model::Column)) && a[:uuid] %}
-            @{{iv.name}} ||= ::Silth::Crypto.uuid7
+            {% if a[:uuid] == :v4 %}
+              @{{iv.name}} ||= UUID.random.to_s
+            {% else %}
+              @{{iv.name}} ||= ::Silth::Crypto.uuid7
+            {% end %}
           {% end %}
         {% end %}
       {% end %}

@@ -44,7 +44,7 @@ module Silth
       end
     end
 
-    record Attachment, filename : String, content : Bytes, content_type : String, inline : Bool = false
+    record Attachment, filename : String, content : Bytes, content_type : String, inline : Bool = false, content_id : String? = nil
 
     getter to_list = [] of Address
     getter cc_list = [] of Address
@@ -127,6 +127,11 @@ module Silth
       @attachments << Attachment.new(filename, data.to_slice, content_type)
     end
 
+    # An image shown inside the HTML body: `<img src="cid:logo">` with `attach_inline(png, "logo.png", "image/png", "logo")`.
+    def attach_inline(data : Bytes | String, filename : String, content_type : String, content_id : String) : Nil
+      @attachments << Attachment.new(filename, data.to_slice, content_type, inline: true, content_id: content_id)
+    end
+
     # :nodoc:
     def prepare! : self
       return self if @built
@@ -186,6 +191,7 @@ module Silth
           io << "--" << boundary << "\r\n"
           io << "Content-Type: " << a.content_type << "; name=\"" << a.filename << "\"\r\n"
           io << "Content-Disposition: " << (a.inline ? "inline" : "attachment") << "; filename=\"" << a.filename << "\"\r\n"
+          io << "Content-ID: <" << a.content_id << ">\r\n" if a.content_id
           io << "Content-Transfer-Encoding: base64\r\n\r\n"
           io << Mailer.wrap_base64(a.content) << "\r\n"
         end
