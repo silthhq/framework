@@ -1,8 +1,30 @@
 module Silth
   # Code generators used by `silth generate <type> <Name> [fields…]`.
   module Generators
-    # `title:string`, `body:text?` (nullable), `user:references`, `embedding:vector:1536`, `price:decimal`.
+    # Raised for a field type the generators do not know (`views:int33`).
+    class UnknownFieldType < Silth::Command::Error
+      def initialize(spec : String, type : String)
+        super("Unknown type '#{type}' in '#{spec}'. Use one of: #{Field::TYPES.keys.join(", ")} (append ? for a nullable column)")
+      end
+    end
+
+    # `title:string`, `body:text?` (nullable), `user:references`, `embedding:vector:1536`,
+    # `price:decimal` (or `decimal:12,4` for precision and scale), `views:int32`.
     struct Field
+      # Accepted spellings => canonical type.
+      TYPES = {
+        "string" => "string", "text" => "text", "citext" => "citext", "email" => "email", "url" => "url", "uuid" => "uuid",
+        "integer" => "integer", "int" => "integer", "int32" => "integer", "i32" => "integer",
+        "bigint" => "bigint", "int64" => "bigint", "i64" => "bigint", "long" => "bigint",
+        "smallint" => "smallint", "int16" => "smallint",
+        "float" => "float", "float64" => "float", "double" => "float", "number" => "float",
+        "decimal" => "decimal", "numeric" => "decimal", "money" => "decimal",
+        "bool" => "boolean", "boolean" => "boolean",
+        "datetime" => "timestamp", "timestamp" => "timestamp", "date" => "date", "time" => "time",
+        "json" => "json", "jsonb" => "json", "vector" => "vector",
+        "references" => "references", "belongs_to" => "references", "ref" => "references",
+      }
+
       getter name : String
       getter type : String
       getter nullable : Bool
@@ -13,12 +35,13 @@ module Silth
         @name = Inflector.underscore(parts[0])
         raw = parts[1]? || "string"
         @nullable = raw.ends_with?('?')
-        @type = raw.rchop('?').downcase
+        given = raw.rchop('?').downcase
+        @type = TYPES[given]? || raise UnknownFieldType.new(spec, given)
         @option = parts[2]?
       end
 
       def reference? : Bool
-        @type.in?("references", "belongs_to", "ref")
+        @type == "references"
       end
 
       def column_name : String
@@ -27,16 +50,18 @@ module Silth
 
       def crystal_type : String
         base = case @type
-               when "text", "string", "uuid", "citext", "email", "url" then "String"
-               when "integer", "int"                                  then "Int32"
-               when "bigint"                                          then "Int64"
-               when "float", "decimal", "number"                      then "Float64"
-               when "bool", "boolean"                                 then "Bool"
-               when "datetime", "timestamp", "date", "time"          then "Time"
-               when "json", "jsonb"                                   then "JSON::Any"
-               when "vector"                                          then "Array(Float32)"
-               when "references", "belongs_to", "ref"                 then "Int64"
-               else                                                        "String"
+               when "integer"    then "Int32"
+               when "bigint"     then "Int64"
+               when "smallint"   then "Int16"
+               when "float"      then "Float64"
+               when "decimal"    then "Decimal"
+               when "boolean"    then "Bool"
+               when "timestamp"  then "Time"
+               when "date"       then "Date"
+               when "json"       then "JSON::Any"
+               when "vector"     then "Array(Float32)"
+               when "references" then "Int64"
+               else                   "String" # string, text, citext, email, url, uuid, time (of day)
                end
         nilable = @nullable || base.in?("Time", "JSON::Any", "Array(Float32)")
         base == "Bool" ? "Bool = false" : (nilable ? "#{base}?" : base)
@@ -44,17 +69,21 @@ module Silth
 
       def migration_line : String
         case @type
-        when "references", "belongs_to", "ref" then "t.references :#{@name}#{@nullable ? ", null: true, on_delete: :nullify" : ""}"
+        when "references"                      then "t.references :#{@name}#{@nullable ? ", null: true, on_delete: :nullify" : ""}"
         when "text"                            then "t.text :#{@name}#{null_opt}"
-        when "integer", "int"                  then "t.integer :#{@name}#{null_opt}"
+        when "integer"                         then "t.integer :#{@name}#{null_opt}"
+        when "smallint"                        then "t.smallint :#{@name}#{null_opt}"
         when "bigint"                          then "t.bigint :#{@name}#{null_opt}"
-        when "float", "number"                 then "t.float :#{@name}#{null_opt}"
-        when "decimal"                         then "t.decimal :#{@name}, precision: 10, scale: 2#{null_opt}"
-        when "bool", "boolean"                 then "t.boolean :#{@name}, null: false, default: false"
-        when "datetime", "timestamp"           then "t.timestamp :#{@name}"
-        when "date"                            then "t.date :#{@name}"
+        when "float"                           then "t.float :#{@name}#{null_opt}"
+        when "decimal"
+          precision, scale = (@option || "10,2").split(',').map(&.strip.to_i)
+          "t.decimal :#{@name}, precision: #{precision}, scale: #{scale || 0}#{null_opt}"
+        when "boolean"                         then "t.boolean :#{@name}, null: false, default: false"
+        when "timestamp"                       then "t.timestamp :#{@name}"
+        when "date"                            then "t.date :#{@name}#{null_opt}"
         when "time"                            then "t.time :#{@name}"
-        when "json", "jsonb"                   then "t.jsonb :#{@name}"
+        when "json"                            then "t.jsonb :#{@name}"
+        when "citext"                          then "t.citext :#{@name}#{null_opt}"
         when "uuid"                            then "t.uuid :#{@name}#{null_opt}"
         when "vector"                          then "t.vector :#{@name}, #{@option || 1536}"
         else                                        "t.string :#{@name}#{null_opt}"
@@ -68,10 +97,10 @@ module Silth
       def form_input : String
         case @type
         when "text"                      then "f.text_area :#{column_name}"
-        when "integer", "int", "bigint", "references", "belongs_to", "ref" then "f.number_field :#{column_name}"
-        when "float", "decimal", "number" then "f.number_field :#{column_name}, step: \"any\""
-        when "bool", "boolean"           then "f.check_box :#{column_name}"
-        when "datetime", "timestamp"     then "f.datetime_field :#{column_name}"
+        when "integer", "bigint", "smallint", "references" then "f.number_field :#{column_name}"
+        when "float", "decimal"          then "f.number_field :#{column_name}, step: \"any\""
+        when "boolean"                   then "f.check_box :#{column_name}"
+        when "timestamp"                 then "f.datetime_field :#{column_name}"
         when "date"                      then "f.date_field :#{column_name}"
         when "email"                     then "f.email_field :#{column_name}"
         when "url"                       then "f.url_field :#{column_name}"
@@ -80,7 +109,7 @@ module Silth
       end
 
       def displayable? : Bool
-        !@type.in?("vector", "json", "jsonb")
+        !@type.in?("vector", "json")
       end
 
       def string_like? : Bool
@@ -349,7 +378,7 @@ module Silth
           type = f.crystal_type.split(" = ").first.rchop('?')
           type = "Int64" if f.reference?
           opts = f.string_like? && !f.nullable ? ", min: 1" : ""
-          "  field #{f.column_name} : #{type}#{f.nullable || f.type.in?("bool", "boolean") ? "?" : ""}#{opts}"
+          "  field #{f.column_name} : #{type}#{f.nullable || f.type == "boolean" ? "?" : ""}#{opts}"
         end
         create "src/requests/#{singular}_request.cr", <<-CR
           # Validated input for #{@name} create/update (documented in OpenAPI).
@@ -357,7 +386,7 @@ module Silth
           #{request_fields.join('\n')}
           end
           CR
-        assigns = @fields.select(&.displayable?).map { |f| "      #{singular}.#{f.column_name} = data.#{f.column_name}#{f.nullable || f.type.in?("bool", "boolean") ? " unless data.#{f.column_name}.nil?" : ""}" }.join('\n')
+        assigns = @fields.select(&.displayable?).map { |f| "      #{singular}.#{f.column_name} = data.#{f.column_name}#{f.nullable || f.type == "boolean" ? " unless data.#{f.column_name}.nil?" : ""}" }.join('\n')
         create "src/controllers/api/#{plural}_controller.cr", <<-CR
           module Api
             class #{controller} < ApiController
@@ -423,11 +452,15 @@ module Silth
         attrs = @fields.reject(&.reference?).select(&.displayable?).map do |f|
           value = case f.type
                   when "text"                             then "fake.paragraph"
-                  when "integer", "int"                   then "fake.number(1, 100)"
+                  when "integer"                          then "fake.number(1, 100)"
                   when "bigint"                           then "fake.number(1, 100).to_i64"
-                  when "float", "decimal", "number"       then "fake.price"
-                  when "bool", "boolean"                  then "fake.bool"
-                  when "datetime", "timestamp", "date"    then "fake.date"
+                  when "smallint"                         then "fake.number(1, 100).to_i16"
+                  when "float"                            then "fake.price"
+                  when "decimal"                          then "Decimal.new(fake.price.round(2))"
+                  when "boolean"                          then "fake.bool"
+                  when "timestamp"                        then "fake.date"
+                  when "date"                             then "Date.new(fake.date)"
+                  when "uuid"                             then "UUID.random.to_s"
                   when "email"                            then "fake.email"
                   when "url"                              then "fake.url"
                   else                                         f.name.includes?("name") ? "fake.name" : (f.name.includes?("email") ? "fake.email" : "fake.title")
@@ -452,6 +485,7 @@ module Silth
       when "String"          then type.ends_with?("?") ? nil : %("Example")
       when "Int32", "Int64"  then type.ends_with?("?") ? nil : "1"
       when "Float64"         then type.ends_with?("?") ? nil : "1.5"
+      when "Decimal"         then type.ends_with?("?") ? nil : %(Decimal.new("9.99"))
       when "Bool"            then "true"
       else                        nil
       end

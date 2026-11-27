@@ -24,6 +24,19 @@ module Silth
     SESSION_HASH = "_auth_hash"
     REMEMBER     = "remember_token"
 
+    # Stores *password* again when its hash was made with other settings than
+    # `config/auth.yml` (another algorithm, cost or memory). Called after a
+    # successful login; never fails the login.
+    def self.rehash(user : Authenticatable, password : String) : Nil
+      return unless Silth.config.bool("auth.rehash_on_login", true)
+      digest = user.read_attribute("password_digest").as?(String) || return
+      return unless Password.needs_rehash?(digest)
+      user.password = password
+      user.save(validate: false) if user.responds_to?(:save)
+    rescue ex
+      Log.warn { "Could not re-hash the password of #{user.class.name} #{user.auth_id}: #{ex.message}" }
+    end
+
     # Include in the model representing users.
     module Authenticatable
       # Identifier stored in the session.
@@ -36,8 +49,9 @@ module Silth
         "email"
       end
 
+      # Hashes with `auth.password_algorithm` (bcrypt or Argon2id, see `Silth::Password`).
       def password=(plain : String) : Nil
-        write_attribute("password_digest", Crypto.hash_password(plain, Silth.test? ? 4 : Silth.config.int("auth.bcrypt_cost", 12)))
+        write_attribute("password_digest", Password.hash(plain))
       end
 
       def authenticate?(plain : String) : Bool
@@ -128,6 +142,7 @@ module Silth
         user = Auth.find_by_credentials(login)
         if user && user.authenticate?(password)
           RateLimit.clear(key, 1.minute)
+          Auth.rehash(user, password)
           login(user, remember)
           Events.dispatch(LoggedIn.new(user.auth_id, user.class.name))
           true
@@ -388,32 +403,50 @@ module Silth
     end
   end
 
-  # Compact JSON Web Tokens (HS256).
+  # Compact JSON Web Tokens signed with HMAC: HS256 (default), HS384 or HS512.
   #
   # ```
   # token = Silth::JWT.encode({"sub" => user.auth_id}, secret, expires_in: 1.hour)
+  # token = Silth::JWT.encode(claims, secret, algorithm: "HS512")
   # claims = Silth::JWT.decode(token, secret) # raises Silth::JWT::Invalid
+  # claims = Silth::JWT.decode(token, secret, algorithms: ["HS512"]) # only accept HS512
   # ```
+  #
+  # `auth.jwt_algorithm` in `config/auth.yml` sets the default algorithm for
+  # `encode`. `decode` accepts the three HMAC algorithms unless told otherwise,
+  # and never `none`.
   module JWT
     class Invalid < Silth::Error; end
 
-    def self.encode(claims : Hash(String, _), secret : String, expires_in : Time::Span? = nil) : String
+    ALGORITHMS = {
+      "HS256" => OpenSSL::Algorithm::SHA256,
+      "HS384" => OpenSSL::Algorithm::SHA384,
+      "HS512" => OpenSSL::Algorithm::SHA512,
+    }
+
+    def self.default_algorithm : String
+      Silth.config.string("auth.jwt_algorithm", "HS256").upcase
+    end
+
+    def self.encode(claims : Hash(String, _), secret : String, expires_in : Time::Span? = nil, algorithm : String = default_algorithm) : String
+      digest = ALGORITHMS[algorithm]? || raise ArgumentError.new("Unsupported JWT algorithm #{algorithm} (use #{ALGORITHMS.keys.join(", ")})")
       payload = JSON.parse(claims.to_json).as_h
       now = Time.utc.to_unix
       payload["iat"] ||= JSON::Any.new(now)
       payload["exp"] = JSON::Any.new(now + expires_in.total_seconds.to_i64) if expires_in
-      header = b64(%({"alg":"HS256","typ":"JWT"}))
+      header = b64(%({"alg":"#{algorithm}","typ":"JWT"}))
       body = b64(payload.to_json)
-      signature = Base64.urlsafe_encode(Crypto.hmac(secret, "#{header}.#{body}"), padding: false)
-      "#{header}.#{body}.#{signature}"
+      "#{header}.#{body}.#{sign(digest, secret, "#{header}.#{body}")}"
     end
 
-    def self.decode(token : String, secret : String, leeway : Int32 = 30) : Hash(String, JSON::Any)
+    def self.decode(token : String, secret : String, leeway : Int32 = 30, algorithms : Array(String) = ALGORITHMS.keys) : Hash(String, JSON::Any)
       parts = token.split('.')
       raise Invalid.new("Malformed token") unless parts.size == 3
       header = JSON.parse(String.new(Base64.decode(parts[0])))
-      raise Invalid.new("Unsupported algorithm") unless header["alg"]?.try(&.as_s?) == "HS256"
-      expected = Base64.urlsafe_encode(Crypto.hmac(secret, "#{parts[0]}.#{parts[1]}"), padding: false)
+      algorithm = header["alg"]?.try(&.as_s?) || ""
+      digest = ALGORITHMS[algorithm]?
+      raise Invalid.new("Unsupported algorithm") unless digest && algorithms.includes?(algorithm)
+      expected = sign(digest, secret, "#{parts[0]}.#{parts[1]}")
       raise Invalid.new("Bad signature") unless Crypto.secure_compare(expected, parts[2])
       claims = JSON.parse(String.new(Base64.decode(parts[1]))).as_h
       now = Time.utc.to_unix
@@ -426,6 +459,10 @@ module Silth
       claims
     rescue ex : JSON::ParseException | Base64::Error
       raise Invalid.new("Malformed token: #{ex.message}")
+    end
+
+    private def self.sign(digest : OpenSSL::Algorithm, secret : String, data : String) : String
+      Base64.urlsafe_encode(OpenSSL::HMAC.digest(digest, secret, data), padding: false)
     end
 
     def self.decode?(token : String, secret : String) : Hash(String, JSON::Any)?

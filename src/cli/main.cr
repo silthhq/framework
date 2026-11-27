@@ -6,7 +6,7 @@
 require "../silth"
 
 module Silth::Global
-  GLOBAL = %w(new serve s build test version --version -v generate g help --help -h)
+  GLOBAL = %w(new serve s build check test version --version -v generate g help --help -h)
 
   def self.run(args : Array(String)) : Int32
     command = args.first? || "help"
@@ -14,6 +14,7 @@ module Silth::Global
     when "new"                       then NewApp.run(args[1..])
     when "serve", "s"                then DevServer.new(args[1..]).run
     when "build"                     then build(args[1..])
+    when "check"                     then check(args[1..])
     when "test"                      then exec_crystal(["spec"] + args[1..], {"SILTH_ENV" => "test"})
     when "version", "--version", "-v"
       puts "Silth #{Silth::VERSION} (Crystal #{Crystal::VERSION})"
@@ -34,6 +35,7 @@ module Silth::Global
     [{"new <name>", "Create a new application (--db=sqlite|postgres|mysql, --edge for the main branch)"},
      {"serve", "Development server with rebuild on change and live reload"},
      {"build", "Production build (release binaries + fingerprinted assets)"},
+     {"check", "Type-check the app without building it (--spec: the specs too)"},
      {"test", "Run the test suite (crystal spec)"},
      {"generate, g", "Code generators (scaffold, api, model, live, job…)"},
      {"version", "Show versions"}].each { |(n, d)| puts "    #{n.ljust(26).colorize(:green)}#{d}" }
@@ -76,6 +78,41 @@ module Silth::Global
 
   def self.exec_crystal(args : Array(String), env : Hash(String, String) = {} of String => String) : Int32
     Process.run("crystal", args, env: env, output: Process::Redirect::Inherit, error: Process::Redirect::Inherit, input: Process::Redirect::Inherit).exit_code
+  end
+
+  # Type-checks the application without generating code: every target of
+  # `shard.yml` (the server and `src/cli.cr`) as one program, and the specs with
+  # `--spec`. About half the time of a build, so agents and editors verify a
+  # change in seconds.
+  def self.check(args : Array(String)) : Int32
+    files = args.reject(&.starts_with?('-'))
+    if files.empty?
+      files = check_targets
+      files.concat(Dir.glob("spec/**/*_spec.cr").sort) if args.includes?("--spec")
+    end
+    if files.empty?
+      STDERR.puts "#{"✖".colorize(:red)} Nothing to check: no targets in shard.yml (or pass files: silth check src/app.cr)"
+      return 1
+    end
+    started = Time.instant
+    log = IO::Memory.new
+    status = Process.run("crystal", ["build", "--no-codegen", "--no-color"] + files, output: log, error: log)
+    elapsed = (Time.instant - started).total_seconds.round(1)
+    if status.success?
+      STDERR.puts "#{"✔".colorize(:green)} #{files.size} file(s) type-check (#{elapsed}s)"
+      0
+    else
+      STDERR.puts log.to_s.lines.reject(&.includes?("Warning")).join('\n')
+      STDERR.puts "#{"✖".colorize(:red)} type errors (#{elapsed}s)"
+      1
+    end
+  end
+
+  # The `main` files of the targets in `shard.yml`.
+  def self.check_targets : Array(String)
+    return [] of String unless File.exists?("shard.yml")
+    targets = YAML.parse(File.read("shard.yml"))["targets"]?.try(&.as_h?) || return [] of String
+    targets.values.compact_map { |t| t["main"]?.try(&.as_s?) }.select { |f| File.exists?(f) }.uniq
   end
 
   def self.build(args : Array(String)) : Int32

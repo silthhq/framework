@@ -50,6 +50,20 @@ describe Silth::Crypto do
     Silth::Crypto.uuid7.size.should eq(36)
   end
 
+  it "signs and verifies JWTs with HS384 and HS512" do
+    token = Silth::JWT.encode({"sub" => "42"}, "k", algorithm: "HS512")
+    JSON.parse(String.new(Base64.decode(token.split('.')[0])))["alg"].should eq("HS512")
+    Silth::JWT.decode(token, "k")["sub"].should eq("42")
+    Silth::JWT.decode(Silth::JWT.encode({"sub" => "1"}, "k", algorithm: "HS384"), "k")["sub"].should eq("1")
+    expect_raises(Silth::JWT::Invalid, /Unsupported algorithm/) { Silth::JWT.decode(token, "k", algorithms: ["HS256"]) }
+    # Signed by another implementation (Python's hmac, as Rust's jsonwebtoken does)
+    foreign = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJwaWQiOiIxMTExMTExMS0yMjIyLTMzMzMtNDQ0NC01NTU1NTU1NTU1NTUiLCJleHAiOjQxMDI0NDQ4MDAsImNsYWltcyI6e319.YVglcxDh_x04lQieoaMBXaCDi8JQ2lkItAXfzx3AYNKZgzMQ76JjF8mHgxccXiLIogucpT7EXVq821Yp8Vk4Pw"
+    Silth::JWT.decode(foreign, "loco-secret")["pid"].should eq("11111111-2222-3333-4444-555555555555")
+    expect_raises(Silth::JWT::Invalid) { Silth::JWT.decode(foreign, "other") }
+    none = Base64.urlsafe_encode(%({"alg":"none"}), padding: false) + "." + foreign.split('.')[1] + "."
+    expect_raises(Silth::JWT::Invalid) { Silth::JWT.decode(none, "loco-secret") }
+  end
+
   it "issues and validates JWTs and TOTP codes" do
     token = Silth::JWT.encode({"sub" => "42"}, "k", expires_in: 1.minute)
     Silth::JWT.decode(token, "k")["sub"].as_s.should eq("42")

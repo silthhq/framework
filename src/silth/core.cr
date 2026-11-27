@@ -66,8 +66,8 @@ module Silth
     app.boot
   end
 
-  def self.serve(host : String? = nil, port : Int32? = nil) : Nil
-    app.serve(host, port)
+  def self.serve(host : String? = nil, port : Int32? = nil, workers : Int32? = nil) : Nil
+    app.serve(host, port, workers)
   end
 
   def self.assets : Assets

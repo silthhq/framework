@@ -147,3 +147,20 @@ describe Silth::DB::SchemaDumper do
     end
   end
 end
+
+describe Silth::Generators::Field do
+  it "maps type spellings to columns and Crystal types" do
+    Silth::Generators::Field.new("views:int32").crystal_type.should eq("Int32")
+    Silth::Generators::Field.new("total:decimal").crystal_type.should eq("Decimal")
+    Silth::Generators::Field.new("total:decimal:12,4").migration_line.should eq("t.decimal :total, precision: 12, scale: 4, null: false")
+    Silth::Generators::Field.new("due_on:date?").crystal_type.should eq("Date?")
+    Silth::Generators::Field.new("count:int64").migration_line.should eq("t.bigint :count, null: false")
+    Silth::Generators::Field.new("price:money?").migration_line.should eq("t.decimal :price, precision: 10, scale: 2")
+  end
+
+  it "refuses an unknown type instead of falling back to a string" do
+    expect_raises(Silth::Generators::UnknownFieldType, /Unknown type 'int33' in 'views:int33'/) do
+      Silth::Generators::Field.new("views:int33")
+    end
+  end
+end

@@ -50,9 +50,10 @@ module Silth::Commands
     command "server", "Start the HTTP server (production style, no reload)"
     option host : String?, "Bind address", short: "b"
     option port : Int32?, "Port", short: "p"
+    option workers : String?, "Worker processes (a number or auto; default: server.workers)", short: "w"
 
     def run : Nil
-      Silth.serve(host, port)
+      Silth.serve(host, port, workers.try { |w| App.worker_count(w) })
     end
   end
 

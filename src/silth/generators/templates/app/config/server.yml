@@ -1,6 +1,10 @@
 host: ${HOST:-127.0.0.1}
 port: ${PORT:-3000}
 reuse_port: false
+# Processes serving requests on the port (Linux balances them): a number, or
+# `auto` for one per CPU. Crystal runs one thread per process.
+workers: ${WEB_CONCURRENCY:-1}
 
 when@production:
   host: 0.0.0.0
+  workers: ${WEB_CONCURRENCY:-auto}

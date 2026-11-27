@@ -123,3 +123,23 @@ describe "background services" do
     url.should contain("bucket.s3.us-east-1.amazonaws.com/reports/q4.pdf")
   end
 end
+
+describe "Silth::HTTPClient multipart" do
+  it "sends fields and files, and reads binary responses" do
+    pdf = Bytes[0x25, 0x50, 0x44, 0x46, 0xFF, 0x00, 0x0A]
+    Silth::HTTPClient.fake("gotenberg.test/*") { |r| Silth::HTTPClient::Response.new(200, String.new(pdf), HTTP::Headers{"Content-Type" => "application/pdf"}, r.resource) }
+    response = Silth::HTTPClient.new.base_url("http://gotenberg.test").post("/forms/chromium/convert/html", multipart: [
+      {"files", Silth::HTTPClient::File.new("index.html", "<h1>Invoice</h1>", "text/html")},
+      {"files", Silth::HTTPClient::File.new("logo.png", Bytes[0x89, 0x50, 0x00], "image/png")},
+      {"paperWidth", "8.27"},
+    ] of {String, Silth::HTTPClient::Part})
+    response.bytes.should eq(pdf)
+    request = Silth::HTTPClient.recorded.last
+    request.headers["Content-Type"].should start_with("multipart/form-data; boundary=silth-")
+    parts = [] of {String, String?, String}
+    HTTP::FormData.parse(request) { |part| parts << {part.name, part.filename, part.body.gets_to_end} }
+    parts.should eq([{"files", "index.html", "<h1>Invoice</h1>"}, {"files", "logo.png", String.new(Bytes[0x89, 0x50, 0x00])}, {"paperWidth", nil, "8.27"}])
+  ensure
+    Silth::HTTPClient.reset_fakes
+  end
+end

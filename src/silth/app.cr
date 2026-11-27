@@ -153,18 +153,81 @@ module Silth
       end
     end
 
-    def serve(host : String? = nil, port : Int32? = nil) : Nil
-      boot
+    # Serves HTTP until INT or TERM.
+    #
+    # With `workers:` above 1 in `config/server.yml` (`auto` for one per CPU,
+    # `WEB_CONCURRENCY` in the environment), this process becomes a supervisor
+    # that starts that many copies of the application bound to the same port
+    # (`SO_REUSEPORT`, which the Linux kernel balances), restarts a worker that
+    # dies and forwards INT/TERM for a graceful stop.
+    def serve(host : String? = nil, port : Int32? = nil, workers : Int32? = nil) : Nil
       config = Silth.config
       host ||= ENV["HOST"]? || config.string("server.host", "127.0.0.1")
       port ||= (ENV["PORT"]?.try(&.to_i?) || config.int("server.port", 3000))
+      count = workers || App.worker_count(ENV["WEB_CONCURRENCY"]? || config.string("server.workers", "1"))
+      if count > 1 && !ENV["SILTH_WORKER"]?
+        return Workers.new(count, host, port).run { |address| banner(address, count) }
+      end
+      boot
       server = HTTP::Server.new(handler)
       @server = server
-      address = server.bind_tcp(host, port, reuse_port: config.bool("server.reuse_port", false))
+      reuse = config.bool("server.reuse_port", false) || ENV.has_key?("SILTH_WORKER")
+      address = server.bind_tcp(host, port, reuse_port: reuse)
       Signal::INT.trap { shutdown }
       Signal::TERM.trap { shutdown }
-      banner(address.to_s)
+      banner(address.to_s) unless ENV.has_key?("SILTH_WORKER")
       server.listen
+    end
+
+    # `"auto"` (one per CPU) or a number of worker processes.
+    def self.worker_count(setting : String) : Int32
+      value = setting.strip.downcase
+      count = value == "auto" ? System.cpu_count.to_i : (value.to_i? || 1)
+      count.clamp(1, 256)
+    end
+
+    # Runs and supervises worker processes of this executable (see `App#serve`).
+    class Workers
+      Log = ::Log.for("silth.workers")
+
+      @processes = {} of Int32 => Process
+      @stopping = false
+
+      def initialize(@count : Int32, @host : String, @port : Int32)
+      end
+
+      def run(& : String ->) : Nil
+        @count.times { |i| start(i) }
+        Signal::INT.trap { stop(Signal::INT) }
+        Signal::TERM.trap { stop(Signal::TERM) }
+        yield "#{@host}:#{@port}"
+        loop do
+          break if @processes.empty?
+          @processes.to_a.each do |index, process|
+            next unless process.terminated?
+            @processes.delete(index)
+            status = process.wait
+            next if @stopping
+            Log.warn { "Worker #{index} exited (#{status.exit_reason}), restarting" }
+            sleep 500.milliseconds
+            start(index)
+          end
+          sleep 100.milliseconds
+        end
+      end
+
+      private def start(index : Int32) : Nil
+        executable = Process.executable_path || PROGRAM_NAME
+        @processes[index] = Process.new(executable, ARGV, env: {"SILTH_WORKER" => index.to_s, "HOST" => @host, "PORT" => @port.to_s},
+          input: :close, output: :inherit, error: :inherit)
+      end
+
+      private def stop(signal : Signal) : Nil
+        return if @stopping
+        @stopping = true
+        Log.info { "Stopping #{@processes.size} worker(s)…" }
+        @processes.each_value { |process| process.signal(signal) rescue nil }
+      end
     end
 
     def shutdown : Nil
@@ -173,14 +236,15 @@ module Silth
       @server.try &.close
     end
 
-    private def banner(address : String) : Nil
+    private def banner(address : String, workers : Int32 = 1) : Nil
       return if Silth.env == "test"
       url = "http://#{address.sub("0.0.0.0", "localhost").sub("127.0.0.1", "localhost")}"
       puts
       puts "  #{"◆".colorize(:light_cyan)} #{"Silth".colorize.bold} #{Silth::VERSION.colorize(:dark_gray)}  #{Silth.env.colorize(:magenta)}"
       puts "  #{"➜".colorize(:cyan)} #{url.colorize(:light_cyan).underline}"
+      puts "  #{"➜".colorize(:dark_gray)} #{"workers".colorize(:dark_gray)}   #{workers} processes" if workers > 1
       puts "  #{"➜".colorize(:dark_gray)} #{"profiler".colorize(:dark_gray)}  #{url}/_silth/profiler" if Profiler.enabled?
-      puts "  #{"➜".colorize(:dark_gray)} #{"routes".colorize(:dark_gray)}    #{@router.routes.size} registered"
+      puts "  #{"➜".colorize(:dark_gray)} #{"routes".colorize(:dark_gray)}    #{@router.routes.size} registered" if workers == 1
       puts
     end
   end

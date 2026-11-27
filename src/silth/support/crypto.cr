@@ -65,10 +65,9 @@ module Silth
       ::Crypto::Bcrypt::Password.create(password, cost: cost).to_s
     end
 
+    # Verifies bcrypt and Argon2 hashes (see `Silth::Password`).
     def verify_password(password : String, digest : String) : Bool
-      ::Crypto::Bcrypt::Password.new(digest).verify(password)
-    rescue
-      false
+      Password.verify(password, digest)
     end
 
     # Generates a fresh application key (`APP_KEY`).

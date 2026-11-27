@@ -1,4 +1,5 @@
 require "http/client"
+require "http/formdata"
 
 module Silth
   # Expressive HTTP client with retries, timeouts, tracing and test fakes.
@@ -15,7 +16,23 @@ module Silth
   #
   # Silth::HTTPClient.fake("api.example.com/*" => {200, %({"ok":true})})
   # ```
+  #
+  # Files go as `multipart/form-data`; binary responses are read with `bytes`:
+  #
+  # ```
+  # pdf = Silth::HTTPClient.new.base_url("http://gotenberg:3000")
+  #   .post("/forms/chromium/convert/html", multipart: [
+  #     {"files", Silth::HTTPClient::File.new("index.html", html, "text/html")},
+  #     {"paperWidth", "8.27"},
+  #   ])
+  #   .raise_for_status!
+  #   .bytes
+  # ```
   class HTTPClient
+    # A file sent in a multipart request.
+    record File, filename : String, content : Bytes | String, content_type : String = "application/octet-stream"
+
+    alias Part = String | File
     class Error < Silth::Error
       getter response : Response
 
@@ -51,6 +68,11 @@ module Silth
 
       def json : JSON::Any
         JSON.parse(@body)
+      end
+
+      # The raw body (PDFs, images, archives).
+      def bytes : Bytes
+        @body.to_slice
       end
 
       def parse(type : T.class) : T forall T
@@ -131,22 +153,30 @@ module Silth
     end
 
     {% for verb in %w(post put patch) %}
-      def {{verb.id}}(path : String, json = nil, form : Hash(String, String)? = nil, body : String? = nil) : Response
-        request({{verb.upcase}}, path, json: json, form: form, body: body)
+      # Sends *json* (any value), *form* (URL encoded), *multipart* (fields and
+      # `File`s, a name may repeat) or a raw *body*.
+      def {{verb.id}}(path : String, json = nil, form : Hash(String, String)? = nil, body : String | Bytes | Nil = nil,
+                      multipart : Hash(String, Part) | Array({String, Part}) | Nil = nil) : Response
+        request({{verb.upcase}}, path, json: json, form: form, body: body, multipart: multipart)
       end
     {% end %}
 
-    def request(method : String, path : String, query : Hash(String, String)? = nil, json = nil, form : Hash(String, String)? = nil, body : String? = nil) : Response
+    def request(method : String, path : String, query : Hash(String, String)? = nil, json = nil, form : Hash(String, String)? = nil,
+                body : String | Bytes | Nil = nil, multipart : Hash(String, Part) | Array({String, Part}) | Nil = nil) : Response
       url = path.starts_with?("http") ? path : "#{@base}/#{path.lchop('/')}"
       url += (url.includes?('?') ? "&" : "?") + URI::Params.encode(query) if query && !query.empty?
       headers = @headers.dup
-      payload = body
+      payload = body.is_a?(Bytes) ? String.new(body) : body
       if json
         headers["Content-Type"] = "application/json"
         payload = json.to_json
       elsif form
         headers["Content-Type"] = "application/x-www-form-urlencoded"
         payload = URI::Params.encode(form)
+      elsif parts = multipart
+        boundary = "silth-#{Random::Secure.hex(12)}"
+        headers["Content-Type"] = "multipart/form-data; boundary=#{boundary}"
+        payload = HTTPClient.multipart_body(parts.to_a, boundary)
       end
       Telemetry.inject(headers)
       attempt = 0
@@ -185,6 +215,25 @@ module Silth
       ensure
         client.close
       end
+    end
+
+    # Encodes *parts* as a `multipart/form-data` body.
+    def self.multipart_body(parts : Array({String, Part}), boundary : String) : String
+      io = IO::Memory.new
+      HTTP::FormData.build(io, boundary) do |form|
+        parts.each do |(name, part)|
+          case part
+          in String
+            form.field(name, part)
+          in File
+            content = part.content
+            data = content.is_a?(Bytes) ? IO::Memory.new(content) : IO::Memory.new(content)
+            form.file(name, data, HTTP::FormData::FileMetadata.new(filename: part.filename),
+              HTTP::Headers{"Content-Type" => part.content_type})
+          end
+        end
+      end
+      io.to_s
     end
 
     # --- testing ----------------------------------------------------------------
