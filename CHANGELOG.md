@@ -41,6 +41,7 @@ Each release publishes the `silth` CLI for Linux (`amd64`, `arm64`) and macOS wi
 
 ### Fixed
 
+- A response (or request) body declared in a charset the system does not know, such as `application/pdf; charset=binary`, is read as the bytes that were sent instead of failing with `Invalid encoding`.
 - `send_data` and `send_file` write file names outside ASCII as RFC 6266 asks (`filename="ASCII fallback"; filename*=UTF-8''…`, `Silth::ContentDisposition`); a name like `facture-été.pdf` used to produce an invalid header.
 - The PostgreSQL cache computed expiry times with the application's clock and compared them with the database's: entries lived too long (or too short) when the clocks differed.
 

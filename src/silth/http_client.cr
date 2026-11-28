@@ -1,6 +1,22 @@
 require "http/client"
 require "http/formdata"
 
+module HTTP
+  # The standard library transcodes a body from its declared charset and
+  # raises on one iconv does not know, losing the whole message. A file
+  # served as `application/pdf; charset=binary` is common enough: an unknown
+  # charset now leaves the body as the bytes that were sent.
+  private def self.check_content_type_charset(body, headers)
+    return unless body
+    content_type = headers["Content-Type"]? || return
+    mime_type = MIME::MediaType.parse?(content_type) || return
+    charset = mime_type["charset"]? || return
+    return if charset.compare("utf-8", case_insensitive: true) == 0 || charset.compare("binary", case_insensitive: true) == 0
+    body.set_encoding(charset, invalid: :skip)
+  rescue ArgumentError
+  end
+end
+
 module Silth
   # Expressive HTTP client with retries, timeouts, tracing and test fakes.
   #

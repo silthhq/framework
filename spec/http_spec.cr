@@ -163,3 +163,21 @@ describe Silth::SecureHeadersMiddleware do
     ctx.response.headers.has_key?("Permissions-Policy").should be_false
   end
 end
+
+describe "Silth::HTTPClient bodies" do
+  it "keeps the bytes of a body whose charset is unknown" do
+    pdf = Bytes[0x25, 0x50, 0x44, 0x46, 0xE2, 0x00, 0xFF]
+    server = HTTP::Server.new do |context|
+      context.response.content_type = context.request.path == "/latin1" ? "text/plain; charset=iso-8859-1" : "application/pdf; charset=binary"
+      context.request.path == "/latin1" ? context.response.write(Bytes[0x63, 0x61, 0x66, 0xE9]) : context.response.write(pdf)
+    end
+    address = server.bind_tcp("127.0.0.1", 0)
+    spawn { server.listen }
+    begin
+      Silth::HTTPClient.new.get("http://127.0.0.1:#{address.port}/file").bytes.should eq(pdf)
+      Silth::HTTPClient.new.get("http://127.0.0.1:#{address.port}/latin1").body.should eq("café")
+    ensure
+      server.close
+    end
+  end
+end
